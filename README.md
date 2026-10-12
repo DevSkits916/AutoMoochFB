@@ -1,4 +1,4 @@
-# Auto FB Group Poster lite
+# Auto Mooch
 
 Double-click `Start-Automation.bat`. Requires Python 3.11 or later with Tkinter. The launcher installs Playwright and its Chromium browser.
 
@@ -10,6 +10,10 @@ Double-click `Start-Automation.bat`. Requires Python 3.11 or later with Tkinter.
 4. Choose headless mode if desired, then **Start Worker**. Joining, recognized rule checkboxes, saved membership answers and posting run automatically.
 
 The worker console opens in its own resizable window. Drag its edges or maximize it. Closing the console hides it while logging continues; **Worker Console** reopens it with its current log history.
+
+**Shuffle Pending** randomizes waiting groups before or during a run without changing the active group or completed results. **Skip Current Group** cancels the current browser task and moves to the next group immediately. If submission has already started, the result requires review and is not automatically retried.
+
+Set **Composer timeout (seconds)** from 1–300 (default 15). Turn **Join groups automatically** off to attempt posting without requesting membership. Timeout and joining settings are captured when you start the worker; changes apply to the next run.
 
 Administrator approval, login, CAPTCHA and identity checks cannot be automated reliably. Pending membership and unavailable composers are skipped. Security checks stop the run. English Facebook controls are currently supported; changed interfaces may need selector updates.
 

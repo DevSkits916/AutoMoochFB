@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import queue
+import random
 import threading
 import time
 import tkinter as tk
@@ -50,6 +51,11 @@ class App:
         self.events = queue.Queue()
         self.stop = threading.Event()
         self.thread = None
+        self.queue_lock = threading.Lock()
+        self.pending = []
+        self.current_task = None
+        self.worker_loop = None
+        self.skip_requested = False
         self.history_path = DATA / 'progress.json'
         self.history = json.loads(self.history_path.read_text('utf-8')) if self.history_path.exists() else {}
         self.headless = tk.BooleanVar()
@@ -57,7 +63,9 @@ class App:
         self.task = tk.StringVar(value='No current task')
         self.counts = tk.StringVar(value='Complete 0     Failed 0     Skipped 0     Remaining 0')
         self.delay = tk.StringVar(value='30')
-        root.title('Automation • Facebook Groups')
+        self.composer_seconds = tk.StringVar(value='15')
+        self.join_groups = tk.BooleanVar(value=True)
+        root.title('Auto Mooch')
         root.geometry('1060x780')
         root.minsize(820, 620)
         style = ttk.Style()
@@ -67,7 +75,7 @@ class App:
         style.configure('HUD.TLabel', font=('Segoe UI', 13, 'bold'))
         frame = ttk.Frame(root, padding=24)
         frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='Facebook Group Automation', style='Title.TLabel').pack(anchor='w')
+        ttk.Label(frame, text='Auto Mooch', style='Title.TLabel').pack(anchor='w')
         ttk.Label(frame, textvariable=self.status, style='HUD.TLabel').pack(anchor='w', pady=(16, 6))
         ttk.Label(frame, textvariable=self.task, wraplength=970).pack(anchor='w')
         ttk.Label(frame, textvariable=self.counts, style='HUD.TLabel').pack(anchor='w', pady=12)
@@ -83,11 +91,18 @@ class App:
         ttk.Button(controls, text='Stop', command=self.request_stop).pack(side='left')
         ttk.Button(controls, text='Worker Console', command=self.show_console).pack(side='left', padx=8)
         ttk.Checkbutton(controls, text='Headless', variable=self.headless).pack(side='right')
+        queue_controls = ttk.Frame(frame)
+        queue_controls.pack(fill='x', pady=(8, 0))
+        ttk.Button(queue_controls, text='Shuffle Pending', command=self.shuffle_pending).pack(side='left')
+        self.skip_button = ttk.Button(queue_controls, text='Skip Current Group', command=self.skip_current, state='disabled')
+        self.skip_button.pack(side='left', padx=8)
         opts = ttk.Frame(frame)
         opts.pack(fill='x', pady=12)
         ttk.Label(opts, text='Seconds between groups:').pack(side='left')
         ttk.Entry(opts, textvariable=self.delay, width=6).pack(side='left', padx=8)
-        ttk.Label(opts, text='Rules accepted automatically • unknown questions skipped').pack(side='left')
+        ttk.Label(opts, text='Composer timeout (seconds):').pack(side='left')
+        ttk.Entry(opts, textvariable=self.composer_seconds, width=6).pack(side='left', padx=8)
+        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).pack(side='left')
         self.table = ttk.Treeview(frame, columns=('group', 'state'), show='headings', height=7)
         self.table.heading('group', text='Group')
         self.table.heading('state', text='Result')
@@ -102,7 +117,7 @@ class App:
         if settings.exists():
             self.answers.insert('1.0', settings.read_text('utf-8'))
         self.console_window = tk.Toplevel(root)
-        self.console_window.title('Automation • Worker Console')
+        self.console_window.title('Auto Mooch • Worker Console')
         self.console_window.geometry('900x450')
         self.console_window.minsize(420, 220)
         self.console_window.resizable(True, True)
@@ -122,6 +137,29 @@ class App:
         self.console_window.deiconify()
         self.console_window.lift()
         self.console_window.focus_set()
+
+    def shuffle_pending(self):
+        with self.queue_lock:
+            if self.thread and self.thread.is_alive():
+                random.shuffle(self.pending)
+                order = list(self.pending)
+            else:
+                order = [int(i) for i in self.table.get_children()
+                         if not self.table.set(i, 'state').startswith(('Complete', 'Review'))]
+                random.shuffle(order)
+            for index in order:
+                self.table.move(str(index), '', 'end')
+        self.log(f'Shuffled {len(order)} pending groups.')
+
+    def skip_current(self):
+        with self.queue_lock:
+            task = self.current_task
+            if task is None or task.done() or self.skip_requested:
+                return
+            self.skip_requested = True
+            self.worker_loop.call_soon_threadsafe(task.cancel)
+        self.skip_button.configure(state='disabled')
+        self.log('Skipping current group…')
 
     def import_csv(self):
         path = filedialog.askopenfilename(filetypes=[('CSV files', '*.csv')])
@@ -158,6 +196,9 @@ class App:
             delay = float(self.delay.get())
             if not 0 <= delay <= 3600:
                 raise ValueError('Delay must be between 0 and 3600 seconds.')
+            composer_seconds = float(self.composer_seconds.get())
+            if not 1 <= composer_seconds <= 300:
+                raise ValueError('Composer timeout must be between 1 and 300 seconds.')
             answers = []
             raw = self.answers.get('1.0', 'end').strip()
             for line in raw.splitlines():
@@ -177,7 +218,10 @@ class App:
         self.status.set('Login browser open' if login else 'Worker running')
         # Read Tk variables on the GUI thread only.
         headless = False if login else self.headless.get()
-        self.thread = threading.Thread(target=lambda: asyncio.run(self.run(login, headless, delay, answers)), daemon=True)
+        join_groups = self.join_groups.get()
+        with self.queue_lock:
+            self.pending = [int(i) for i in self.table.get_children()]
+        self.thread = threading.Thread(target=lambda: asyncio.run(self.run(login, headless, delay, answers, composer_seconds, join_groups)), daemon=True)
         self.thread.start()
 
     def save(self, key, state):
@@ -186,7 +230,7 @@ class App:
         temp.write_text(json.dumps(self.history, indent=2), encoding='utf-8')
         temp.replace(self.history_path)
 
-    async def run(self, login, headless, delay, answers):
+    async def run(self, login, headless, delay, answers, composer_seconds=15, join_groups=True):
         try:
             async with async_playwright() as pw:
                 context = await pw.chromium.launch_persistent_context(str(DATA / 'profile'), headless=headless, viewport={'width': 1440, 'height': 1000})
@@ -198,9 +242,14 @@ class App:
                         while not self.stop.is_set() and context.pages:
                             await asyncio.sleep(.25)
                         return
-                    for index, job in enumerate(self.jobs):
+                    while True:
                         if self.stop.is_set():
                             break
+                        with self.queue_lock:
+                            if not self.pending:
+                                break
+                            index = self.pending.pop(0)
+                        job = self.jobs[index]
                         previous = self.history.get(job['id'], '')
                         if previous.startswith(('Complete', 'Review')):
                             self.log(f"Preserving saved result: {job['name']} — {previous}")
@@ -218,9 +267,21 @@ class App:
                             self.events.put(('task', f"{job['name']} • {text}"))
                             self.log(text)
                         try:
-                            async with asyncio.timeout(120):
-                                await post_to_facebook(page, job, step, join_before_post=True, membership_answers=answers, accept_group_rules=True)
+                            with self.queue_lock:
+                                self.worker_loop = asyncio.get_running_loop()
+                                self.skip_requested = False
+                                self.current_task = asyncio.create_task(post_to_facebook(
+                                    page, job, step, join_before_post=join_groups,
+                                    composer_timeout_ms=int(composer_seconds * 1000),
+                                    membership_answers=answers, accept_group_rules=True))
+                                current_task = self.current_task
+                            self.events.put(('active', True))
+                            async with asyncio.timeout(max(120, composer_seconds * 2 + 90)):
+                                await current_task
                             state = 'Complete'
+                        except asyncio.CancelledError:
+                            state = 'Review: skipped during submission' if submitted else 'Skipped: user requested'
+                            self.log(state)
                         except AutomationError as error:
                             security = error.security
                             prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND'} or security else 'Failed')
@@ -229,10 +290,14 @@ class App:
                         except Exception as error:
                             state = 'Review: uncertain submission' if submitted else 'Failed: browser error'
                             self.log(f'{type(error).__name__}: {error}')
+                        finally:
+                            with self.queue_lock:
+                                self.current_task = None
+                            self.events.put(('active', False))
                         self.save(job['id'], state)
                         self.events.put(('result', index, state))
                         self.log(f"{job['name']}: {state}")
-                        if state != 'Complete':
+                        if state != 'Complete' and state != 'Skipped: user requested':
                             try:
                                 await page.screenshot(path=str(DATA / f'failure-{job["id"][:12]}.png'))
                             except Exception:
@@ -240,6 +305,8 @@ class App:
                         if security:
                             self.log('Worker stopped: use Open Login to resolve login or verification.')
                             break
+                        if state.startswith(('Skipped: user', 'Review: skipped')):
+                            continue
                         deadline = time.monotonic() + delay
                         while not self.stop.is_set() and time.monotonic() < deadline:
                             await asyncio.sleep(min(.25, max(0, deadline-time.monotonic())))
@@ -272,6 +339,8 @@ class App:
                 self.console.configure(state='disabled')
             elif event[0] == 'task':
                 self.task.set(event[1])
+            elif event[0] == 'active':
+                self.skip_button.configure(state='normal' if event[1] else 'disabled')
             elif event[0] == 'result':
                 self.table.set(str(event[1]), 'state', event[2])
                 self.update_counts()

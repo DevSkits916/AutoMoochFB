@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import tkinter as tk
 from playwright.async_api import async_playwright
@@ -29,6 +30,42 @@ class Checks(unittest.TestCase):
 
     def test_specific_answer(self):
         self.assertEqual(membership_answer('Why join this group?', [{'question': 'join', 'answer': 'A'}, {'question': 'Why join', 'answer': 'B'}]), 'B')
+
+    def test_pending_shuffle(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = App(root)
+            for index, state in enumerate(['Complete', 'Queued', 'Review: uncertain', 'Queued']):
+                app.table.insert('', 'end', iid=str(index), values=(str(index), state))
+            with patch('app.random.shuffle', side_effect=lambda items: items.reverse()):
+                app.shuffle_pending()
+            self.assertEqual(app.table.get_children(), ('0', '2', '3', '1'))
+            self.assertEqual(app.table.set('0', 'state'), 'Complete')
+            self.assertEqual(root.title(), 'Auto Mooch')
+        finally:
+            root.destroy()
+
+    def test_skip_cancels_current_only(self):
+        async def check():
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                current = asyncio.create_task(asyncio.sleep(60))
+                next_job = asyncio.create_task(asyncio.sleep(60))
+                app.current_task = current
+                app.worker_loop = asyncio.get_running_loop()
+                app.skip_current()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                self.assertTrue(current.cancelled())
+                self.assertFalse(next_job.cancelled())
+                next_job.cancel()
+                await asyncio.gather(current, next_job, return_exceptions=True)
+            finally:
+                root.destroy()
+        asyncio.run(check())
 
     def test_browser(self):
         asyncio.run(self.browser())
