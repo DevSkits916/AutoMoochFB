@@ -1,4 +1,4 @@
-# Auto Mooch
+#Facebook Groups Auto Mooch
 
 ## Windows EXE
 
