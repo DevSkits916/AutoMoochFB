@@ -12,7 +12,7 @@ if ($LASTEXITCODE) { throw 'Dependency installation failed' }
 if ($LASTEXITCODE) { throw 'Browser installation failed' }
 & .venv/Scripts/python.exe -m unittest -v test_app
 if ($LASTEXITCODE) { throw 'Tests failed' }
-& .venv/Scripts/python.exe -m PyInstaller --noconfirm --onefile --windowed --name AutoMooch --distpath releases --workpath build/pyinstaller --specpath build --collect-all playwright app.py
+& .venv/Scripts/python.exe -m PyInstaller --noconfirm --onefile --windowed --name AutoMooch --icon "$PSScriptRoot/assets/AutoMooch.ico" --add-data "$PSScriptRoot/assets;assets" --distpath releases --workpath build/pyinstaller --specpath build --collect-all playwright app.py
 if ($LASTEXITCODE) { throw 'Executable build failed' }
 $digest = (Get-FileHash releases/AutoMooch.exe -Algorithm SHA256).Hash.ToLowerInvariant()
 "$digest  AutoMooch.exe" | Set-Content -Encoding ascii releases/SHA256SUMS.txt

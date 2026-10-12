@@ -86,18 +86,24 @@ class App:
         self.composer_seconds = tk.StringVar(value='15')
         self.join_groups = tk.BooleanVar(value=True)
         root.title('Auto Mooch')
-        root.geometry('1060x780')
-        root.minsize(820, 620)
+        root.geometry('1280x780')
+        root.minsize(1100, 620)
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('.', font=('Segoe UI', 11))
         style.configure('Title.TLabel', font=('Segoe UI', 24, 'bold'))
         style.configure('HUD.TLabel', font=('Segoe UI', 13, 'bold'))
-        frame = ttk.Frame(root, padding=24)
-        frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='Auto Mooch', style='Title.TLabel').pack(anchor='w')
+        self.panes = ttk.Panedwindow(root, orient='horizontal')
+        self.panes.pack(fill='both', expand=True)
+        frame = ttk.Frame(self.panes, padding=20, width=760)
+        self.panes.add(frame, weight=3)
+        self.header_image = tk.PhotoImage(file=str(ROOT / 'assets' / 'header.png'))
+        root.iconphoto(True, self.header_image)
+        ttk.Label(frame, image=self.header_image).pack(anchor='w')
         ttk.Label(frame, textvariable=self.status, style='HUD.TLabel').pack(anchor='w', pady=(16, 6))
-        ttk.Label(frame, textvariable=self.task, wraplength=970).pack(anchor='w')
+        task_label = ttk.Label(frame, textvariable=self.task, wraplength=700)
+        task_label.pack(anchor='w')
+        frame.bind('<Configure>', lambda event: task_label.configure(wraplength=max(200, event.width - 40)))
         ttk.Label(frame, textvariable=self.counts, style='HUD.TLabel').pack(anchor='w', pady=12)
         self.progress = ttk.Progressbar(frame)
         self.progress.pack(fill='x', pady=(0, 14))
@@ -109,7 +115,6 @@ class App:
             button.pack(side='left', padx=(0, 8))
             self.buttons.append(button)
         ttk.Button(controls, text='Stop', command=self.request_stop).pack(side='left')
-        ttk.Button(controls, text='Worker Console', command=self.show_console).pack(side='left', padx=8)
         ttk.Checkbutton(controls, text='Headless', variable=self.headless).pack(side='right')
         queue_controls = ttk.Frame(frame)
         queue_controls.pack(fill='x', pady=(8, 0))
@@ -123,30 +128,17 @@ class App:
         ttk.Entry(opts, textvariable=self.delay, width=6).pack(side='left', padx=8)
         ttk.Label(opts, text='Composer timeout (seconds):').pack(side='left')
         ttk.Entry(opts, textvariable=self.composer_seconds, width=6).pack(side='left', padx=8)
-        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).pack(side='left')
+        ttk.Checkbutton(frame, text='Join groups automatically', variable=self.join_groups).pack(anchor='w', pady=(0, 10))
         self.table = ttk.Treeview(frame, columns=('group', 'state'), show='headings', height=7)
         self.table.heading('group', text='Group')
         self.table.heading('state', text='Result')
-        self.table.column('group', width=620)
-        self.table.column('state', width=280)
+        self.table.column('group', width=420)
+        self.table.column('state', width=220)
         self.table.pack(fill='both', expand=True)
-        advanced = ttk.LabelFrame(frame, text='Optional saved membership answers: question phrase = truthful answer', padding=6)
-        advanced.pack(fill='x', pady=10)
-        self.answers = tk.Text(advanced, height=2, font=('Segoe UI', 10))
-        self.answers.pack(fill='x')
-        settings = DATA / 'answers.txt'
-        if settings.exists():
-            self.answers.insert('1.0', settings.read_text('utf-8'))
-        self.console_window = tk.Toplevel(root)
-        self.console_window.title('Auto Mooch • Worker Console')
-        self.console_window.geometry('900x450')
-        self.console_window.minsize(420, 220)
-        self.console_window.resizable(True, True)
-        self.console_window.protocol('WM_DELETE_WINDOW', self.console_window.withdraw)
-        console_frame = ttk.Frame(self.console_window, padding=12)
-        console_frame.pack(fill='both', expand=True)
+        console_frame = ttk.Frame(self.panes, padding=12, width=440)
+        self.panes.add(console_frame, weight=2)
         ttk.Label(console_frame, text='Worker console', style='HUD.TLabel').pack(anchor='w', pady=(0, 8))
-        self.console = ScrolledText(console_frame, bg='#17202b', fg='#dce7f3', font=('Consolas', 10), state='disabled')
+        self.console = ScrolledText(console_frame, width=35, bg='#17202b', fg='#dce7f3', font=('Consolas', 10), state='disabled')
         self.console.pack(fill='both', expand=True)
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.poll)
@@ -170,9 +162,7 @@ class App:
         threading.Thread(target=sound, name='posting-limit-alarm', daemon=True).start()
 
     def show_console(self):
-        self.console_window.deiconify()
-        self.console_window.lift()
-        self.console_window.focus_set()
+        self.console.focus_set()
 
     def shuffle_pending(self):
         with self.queue_lock:
@@ -268,7 +258,8 @@ class App:
             if not 1 <= composer_seconds <= 300:
                 raise ValueError('Composer timeout must be between 1 and 300 seconds.')
             answers = []
-            raw = self.answers.get('1.0', 'end').strip()
+            settings = DATA / 'answers.txt'
+            raw = settings.read_text('utf-8').strip() if settings.exists() else ''
             for line in raw.splitlines():
                 if not line.strip():
                     continue
@@ -276,7 +267,6 @@ class App:
                 if not sep or not question.strip() or not answer.strip():
                     raise ValueError('Use question phrase = answer, one per line.')
                 answers.append({'question': question.strip(), 'answer': answer.strip()})
-            (DATA / 'answers.txt').write_text(raw, encoding='utf-8')
         except ValueError as error:
             messagebox.showerror('Settings', str(error))
             return
@@ -454,7 +444,6 @@ if __name__ == '__main__':
         try:
             app = App(tk.Tk())
             app.root.update()
-            app.console_window.withdraw()
             app.show_console()
             app.root.update()
             app.root.destroy()

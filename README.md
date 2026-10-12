@@ -16,10 +16,10 @@ Double-click `Start-Automation.bat`. Requires Python 3.11 or later with Tkinter.
 
 1. Use **Open Login** once, sign in to Facebook, then press **Stop** to close the browser and save the session.
 2. **Import CSV** accepts UTF-8 CSVs with `URL` and `post` columns (case insensitive), including multiline quoted posts. Other columns are preserved in the source file; `Group Name` is used for display.
-3. Optionally enter truthful membership answers as `question phrase = answer`, one per line. The most specific matching phrase wins. Unknown questions are skipped rather than invented.
+3. Unknown membership questions are skipped rather than invented. Previously saved truthful mappings in the private `answers.txt` file still work; the answers editor has been removed from the interface.
 4. Choose headless mode if desired, then **Start Worker**. Joining, recognized rule checkboxes, saved membership answers and posting run automatically.
 
-The worker console opens in its own resizable window. Drag its edges or maximize it. Closing the console hides it while logging continues; **Worker Console** reopens it with its current log history.
+The worker console is attached to the right side of the main window. Drag the divider between the queue and console to adjust their widths.
 
 **Shuffle Pending** randomizes waiting groups before or during a run without changing the active group or completed results. **Skip Current Group** cancels the current browser task and moves to the next group immediately. If submission has already started, the result requires review and is not automatically retried.
 
