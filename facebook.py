@@ -15,6 +15,29 @@ class AutomationError(RuntimeError):
 
 CHECKPOINT = re.compile(r"checkpoint|confirm your identity|account temporarily locked|security check", re.I)
 CAPTCHA = re.compile(r"captcha|enter the characters you see", re.I)
+POST_LIMIT = re.compile(r"we limit how often you can (?:post|comment)|you (?:can['’]t|cannot) (?:try again|post) (?:again )?(?:later|right now|at the moment)|temporarily blocked from (?:posting|using this feature)", re.I)
+
+
+async def verify_submission(page, editor, timeout_ms=15000):
+    restriction = page.get_by_role('dialog').get_by_text(POST_LIMIT).filter(visible=True).first
+    hidden = asyncio.create_task(editor.wait_for(state='hidden', timeout=timeout_ms))
+    limited = asyncio.create_task(restriction.wait_for(state='visible', timeout=timeout_ms))
+    try:
+        done, _ = await asyncio.wait([hidden, limited], return_when=asyncio.FIRST_COMPLETED)
+        if await restriction.is_visible():
+            raise AutomationError('POSTING_RESTRICTED', 'Facebook limited posting. Worker stopped; review the restriction before restarting.', security=True)
+        if hidden in done:
+            await hidden
+            return
+        await limited
+        raise AutomationError('POSTING_RESTRICTED', 'Facebook limited posting. Worker stopped; review the restriction before restarting.', security=True)
+    except PlaywrightTimeoutError as error:
+        raise AutomationError('POST_UNCERTAIN', 'Submission was clicked but the composer did not close; review before retrying.') from error
+    finally:
+        for task in (hidden, limited):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(hidden, limited, return_exceptions=True)
 
 
 async def first_visible(page, locators, timeout_ms: int = 8000):
@@ -228,10 +251,7 @@ async def post_to_facebook(page, job: dict, on_step: Callable[[str], None] = lam
         await post_button.click(timeout=10000)
         submitted = True
         on_step("Verifying post...")
-        try:
-            await editor.wait_for(state="hidden", timeout=15000)
-        except PlaywrightTimeoutError as error:
-            raise AutomationError("POST_UNCERTAIN", "Submission was clicked but the composer did not close; review before retrying.") from error
+        await verify_submission(page, editor)
         return {"status": "posted"}
     except AutomationError:
         raise

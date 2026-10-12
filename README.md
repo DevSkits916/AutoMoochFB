@@ -29,6 +29,8 @@ Set **Composer timeout (seconds)** from 1–300 (default 15). Turn **Join groups
 
 If membership checking times out, the worker still searches for the composer and attempts to post in that same group before proceeding. The composer gets its own timeout. Explicit pending approval and unanswered membership questions still skip the group; a timeout alone does not skip posting.
 
+If Facebook shows “We limit how often you can post…” in the composer after submission, the worker stops without loading the next group, sounds a repeating Windows beep, and shows a posting-limit status. The current result requires review and is not automatically retried; remaining groups stay queued. Failure screenshots and logs are saved. Detection uses the English restriction message rather than text color, so ordinary red text in a post does not trigger the alarm.
+
 Administrator approval, login, CAPTCHA and identity checks cannot be automated reliably. Pending membership and unavailable composers are skipped. Security checks stop the run. English Facebook controls are currently supported; changed interfaces may need selector updates.
 
 Complete means the composer closed after submission; it does not guarantee public visibility or administrator approval. Results without a clear submission confirmation require review. Completed and uncertain jobs are never automatically retried, including identical URL/post duplicates. Skipped and failed jobs may be attempted on the next start. Stop finishes the current group (bounded by 120 seconds); closing the app waits for a clean shutdown.

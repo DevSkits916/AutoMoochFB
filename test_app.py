@@ -101,6 +101,49 @@ class Checks(unittest.TestCase):
     def test_membership_timeout_still_posts(self):
         asyncio.run(self.timeout_post())
 
+    def test_posting_limit_stops_worker(self):
+        asyncio.run(self.posting_limit())
+
+    async def posting_limit(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = App(root)
+            app.history = {}
+            app.jobs = [dict(id=str(i), name=f'Group {i}', groupUrl=f'https://www.facebook.com/groups/{i}', postText='Test post') for i in (123, 456)]
+            app.pending = [0, 1]
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    context = await browser.new_context()
+                    page = await context.new_page()
+                    html = '''<button onclick="document.querySelector('[role=dialog]').style.display='block'">Write something</button><div role="dialog" style="display:none"><div role="textbox" contenteditable="true"></div><button onclick="setTimeout(()=>document.querySelector('#error').textContent='We limit how often you can post, comment or do other things in a given amount of time in order to help protect the community from spam. You can try again later.', 100)">Post</button><div id="error" style="color:red"></div></div>'''
+                    navigations = []
+                    async def route_handler(route):
+                        navigations.append(route.request.url)
+                        await route.fulfill(body=html, content_type='text/html')
+                    await context.route('https://www.facebook.com/groups/*', route_handler)
+                    fake_pw = Mock()
+                    fake_pw.chromium.launch_persistent_context = AsyncMock(return_value=context)
+                    manager = Mock()
+                    manager.__aenter__ = AsyncMock(return_value=fake_pw)
+                    manager.__aexit__ = AsyncMock(return_value=None)
+                    with tempfile.TemporaryDirectory() as folder:
+                        app.history_path = Path(folder) / 'progress.json'
+                        with patch('app.async_playwright', return_value=manager), patch.object(page, 'screenshot', new=AsyncMock()):
+                            await app.run(False, True, 0, [], join_groups=False)
+                    self.assertTrue(app.stop.is_set())
+                    self.assertEqual(app.pending, [1])
+                    self.assertEqual(navigations, [app.jobs[0]['groupUrl']])
+                    self.assertEqual(app.history['123'], 'Review: POSTING_RESTRICTED')
+                    events = list(app.events.queue)
+                    self.assertTrue(any(event[0] == 'alert' for event in events))
+                    self.assertIn('posting limit', app.halt_reason)
+                finally:
+                    await browser.close()
+        finally:
+            root.destroy()
+
     async def timeout_post(self):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)

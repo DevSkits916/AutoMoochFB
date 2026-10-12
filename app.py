@@ -75,6 +75,7 @@ class App:
         self.current_task = None
         self.worker_loop = None
         self.skip_requested = False
+        self.halt_reason = None
         self.history_path = DATA / 'progress.json'
         self.history = json.loads(self.history_path.read_text('utf-8')) if self.history_path.exists() else {}
         self.headless = tk.BooleanVar()
@@ -152,6 +153,21 @@ class App:
 
     def log(self, text):
         self.events.put(('log', str(text)))
+
+    def alert_posting_restriction(self, message):
+        self.status.set(message)
+        self.show_console()
+        self.root.deiconify()
+        self.root.lift()
+        def sound():
+            try:
+                import winsound
+                for _ in range(3):
+                    winsound.Beep(1000, 450)
+                    winsound.Beep(650, 450)
+            except (ImportError, RuntimeError):
+                self.events.put(('bell',))
+        threading.Thread(target=sound, name='posting-limit-alarm', daemon=True).start()
 
     def show_console(self):
         self.console_window.deiconify()
@@ -265,6 +281,7 @@ class App:
             messagebox.showerror('Settings', str(error))
             return
         self.stop.clear()
+        self.halt_reason = None
         for button in self.buttons:
             button.configure(state='disabled')
         self.status.set('Login browser open' if login else 'Worker running')
@@ -336,6 +353,10 @@ class App:
                             self.log(state)
                         except AutomationError as error:
                             security = error.security
+                            if error.code == 'POSTING_RESTRICTED':
+                                self.halt_reason = 'Stopped • Facebook posting limit detected'
+                                self.stop.set()
+                                self.events.put(('alert', self.halt_reason))
                             prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND'} or security else 'Failed')
                             state = f'{prefix}: {error.code}'
                             self.log(str(error))
@@ -355,7 +376,7 @@ class App:
                             except Exception:
                                 pass
                         if security:
-                            self.log('Worker stopped: use Open Login to resolve login or verification.')
+                            self.log('Worker stopped: resolve Facebook restrictions or verification before restarting.')
                             break
                         if state.startswith(('Skipped: user', 'Review: skipped')):
                             continue
@@ -393,11 +414,15 @@ class App:
                 self.task.set(event[1])
             elif event[0] == 'active':
                 self.skip_button.configure(state='normal' if event[1] else 'disabled')
+            elif event[0] == 'alert':
+                self.alert_posting_restriction(event[1])
+            elif event[0] == 'bell':
+                self.root.bell()
             elif event[0] == 'result':
                 self.table.set(str(event[1]), 'state', event[2])
                 self.update_counts()
             elif event[0] == 'done':
-                self.status.set('Stopped' if self.stop.is_set() else 'Worker finished • review results')
+                self.status.set(self.halt_reason or ('Stopped' if self.stop.is_set() else 'Worker finished • review results'))
                 self.task.set('No current task')
                 for button in self.buttons:
                     button.configure(state='normal')
