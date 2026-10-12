@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
 from pathlib import Path
 import tkinter as tk
 from playwright.async_api import async_playwright
@@ -27,6 +28,32 @@ class Checks(unittest.TestCase):
         root.update()
         self.assertIn('Complete 0', app.counts.get())
         root.destroy()
+
+    def test_export_remaining_roundtrip(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = App(root)
+            app.jobs = load_csv(Path(__file__).parent / 'sample CSV.csv')[:5]
+            app.history = {}
+            for index, state in enumerate(['Complete', 'Queued', 'Running', 'Skipped: user requested', 'Queued']):
+                app.table.insert('', 'end', iid=str(index), values=(str(index), state))
+            app.table.move('4', '', 0)
+            self.assertEqual(app.remaining_jobs(), [app.jobs[4], app.jobs[1]])
+            with tempfile.TemporaryDirectory() as folder:
+                output = Path(folder) / 'remaining.csv'
+                with patch('app.filedialog.asksaveasfilename', return_value=str(output)), patch('app.messagebox.showinfo'):
+                    app.export_remaining()
+                exported = load_csv(output)
+                self.assertEqual([j['source_row'] for j in exported], [app.jobs[i]['source_row'] for i in (4, 1)])
+                self.assertEqual(exported[0]['source_headers'], app.jobs[4]['source_headers'])
+            app.thread = Mock()
+            app.thread.is_alive.return_value = True
+            app.pending = [4, 0, 1]
+            app.history[app.jobs[0]['id']] = 'Complete'
+            self.assertEqual(app.remaining_jobs(), [app.jobs[4], app.jobs[1]])
+        finally:
+            root.destroy()
 
     def test_specific_answer(self):
         self.assertEqual(membership_answer('Why join this group?', [{'question': 'join', 'answer': 'A'}, {'question': 'Why join', 'answer': 'B'}]), 'B')

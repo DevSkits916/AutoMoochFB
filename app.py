@@ -3,10 +3,12 @@ import asyncio
 import csv
 import hashlib
 import json
+import os
 import queue
 import random
 import threading
 import time
+import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
@@ -16,8 +18,23 @@ from playwright.async_api import async_playwright
 from facebook import post_to_facebook, AutomationError
 
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT / 'data'
+DATA = (Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'AutoMooch') if getattr(sys, 'frozen', False) else ROOT / 'data'
 DATA.mkdir(exist_ok=True)
+
+
+def browser_options():
+    if not getattr(sys, 'frozen', False):
+        return {}
+    for base, relative in [
+        ('PROGRAMFILES(X86)', 'Microsoft/Edge/Application/msedge.exe'),
+        ('PROGRAMFILES', 'Microsoft/Edge/Application/msedge.exe'),
+        ('PROGRAMFILES', 'Google/Chrome/Application/chrome.exe'),
+        ('LOCALAPPDATA', 'Google/Chrome/Application/chrome.exe'),
+    ]:
+        candidate = Path(os.environ.get(base) or '') / relative
+        if candidate.is_file():
+            return {'executable_path': str(candidate)}
+    raise RuntimeError('Install Microsoft Edge or Google Chrome to run the worker in the Windows EXE.')
 
 
 def load_csv(path):
@@ -38,7 +55,9 @@ def load_csv(path):
             canonical = 'https://www.facebook.com/groups/' + parsed.path.strip('/').split('/')[1]
             key = hashlib.sha256((canonical + '\0' + post).encode()).hexdigest()
             jobs.append(dict(id=key, groupUrl=canonical, postText=post,
-                             name=row.get(headers.get('group name', ''), '') or canonical))
+                             name=row.get(headers.get('group name', ''), '') or canonical,
+                             source_row={key: value for key, value in row.items() if key is not None},
+                             source_headers=list(reader.fieldnames)))
     if not jobs:
         raise ValueError('CSV has no jobs.')
     return jobs
@@ -96,6 +115,7 @@ class App:
         ttk.Button(queue_controls, text='Shuffle Pending', command=self.shuffle_pending).pack(side='left')
         self.skip_button = ttk.Button(queue_controls, text='Skip Current Group', command=self.skip_current, state='disabled')
         self.skip_button.pack(side='left', padx=8)
+        ttk.Button(queue_controls, text='Export Remaining CSV', command=self.export_remaining).pack(side='left')
         opts = ttk.Frame(frame)
         opts.pack(fill='x', pady=12)
         ttk.Label(opts, text='Seconds between groups:').pack(side='left')
@@ -160,6 +180,38 @@ class App:
             self.worker_loop.call_soon_threadsafe(task.cancel)
         self.skip_button.configure(state='disabled')
         self.log('Skipping current group…')
+
+    def remaining_jobs(self):
+        with self.queue_lock:
+            if self.thread and self.thread.is_alive():
+                indices = [i for i in self.pending
+                           if not self.history.get(self.jobs[i]['id'], '').startswith(('Complete', 'Review'))]
+            else:
+                indices = [int(i) for i in self.table.get_children()
+                           if self.table.set(i, 'state') == 'Queued']
+            return [self.jobs[i] for i in indices]
+
+    def export_remaining(self):
+        # Snapshot before opening the dialog: the worker can keep advancing.
+        jobs = self.remaining_jobs()
+        if not jobs:
+            messagebox.showinfo('Export Remaining CSV', 'There are no waiting groups to export.')
+            return
+        path = filedialog.asksaveasfilename(
+            title='Export remaining queued groups', defaultextension='.csv',
+            initialfile='remaining-groups.csv', filetypes=[('CSV files', '*.csv')])
+        if not path:
+            return
+        try:
+            with open(path, 'w', encoding='utf-8-sig', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=jobs[0]['source_headers'])
+                writer.writeheader()
+                writer.writerows(job['source_row'] for job in jobs)
+        except (OSError, ValueError, csv.Error) as error:
+            messagebox.showerror('Export failed', str(error))
+            return
+        self.log(f'Exported {len(jobs)} waiting groups to {path}')
+        messagebox.showinfo('Export complete', f'Saved {len(jobs)} waiting groups.')
 
     def import_csv(self):
         path = filedialog.askopenfilename(filetypes=[('CSV files', '*.csv')])
@@ -233,7 +285,7 @@ class App:
     async def run(self, login, headless, delay, answers, composer_seconds=15, join_groups=True):
         try:
             async with async_playwright() as pw:
-                context = await pw.chromium.launch_persistent_context(str(DATA / 'profile'), headless=headless, viewport={'width': 1440, 'height': 1000})
+                context = await pw.chromium.launch_persistent_context(str(DATA / 'profile'), headless=headless, viewport={'width': 1440, 'height': 1000}, **browser_options())
                 try:
                     page = context.pages[0] if context.pages else await context.new_page()
                     if login:
@@ -359,5 +411,32 @@ class App:
             self.root.destroy()
 
 
+async def smoke_browser():
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, **browser_options())
+        try:
+            page = await browser.new_page()
+            await page.set_content('<div contenteditable="true" role="textbox"></div>')
+            await page.get_by_role('textbox').fill('Packaged browser check')
+            assert await page.get_by_role('textbox').inner_text() == 'Packaged browser check'
+        finally:
+            await browser.close()
+
+
 if __name__ == '__main__':
-    App(tk.Tk()).root.mainloop()
+    if len(sys.argv) == 3 and sys.argv[1] == '--smoke-test':
+        report = Path(sys.argv[2])
+        try:
+            app = App(tk.Tk())
+            app.root.update()
+            app.console_window.withdraw()
+            app.show_console()
+            app.root.update()
+            app.root.destroy()
+            asyncio.run(smoke_browser())
+            report.write_text(json.dumps({'ok': True, 'data_path': str(DATA), 'browser': browser_options()}), encoding='utf-8')
+        except Exception as error:
+            report.write_text(json.dumps({'ok': False, 'error': str(error)}), encoding='utf-8')
+            raise
+    else:
+        App(tk.Tk()).root.mainloop()

@@ -2,3 +2,7 @@
 data/
 __pycache__/
 *.pyc
+build/
+releases/
+*.spec
+work/

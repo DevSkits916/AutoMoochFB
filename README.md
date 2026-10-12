@@ -1,5 +1,15 @@
 # Auto Mooch
 
+## Windows EXE
+
+Download `AutoMooch.exe` from the repository's GitHub Releases page and double-click it. Python is not required. Microsoft Edge or Google Chrome must be installed for the worker. Download `sample CSV.csv` from the repository separately if needed.
+
+The EXE keeps its login profile, progress and logs in `%LOCALAPPDATA%\AutoMooch`, independently of the source app's `data` folder. Sign in once with **Open Login**. The executable is unsigned; Windows may display a publisher or SmartScreen warning. `SHA256SUMS.txt` verifies file integrity.
+
+To rebuild on Windows with Python installed: `powershell -ExecutionPolicy Bypass -File .\build.ps1`. Output files are in `releases`.
+
+## Run from source
+
 Double-click `Start-Automation.bat`. Requires Python 3.11 or later with Tkinter. The launcher installs Playwright and its Chromium browser.
 
 `sample CSV.csv` in the repository root contains the supplied group URLs and posts. Import it with **Import CSV**, or use your own CSV with the same columns.
@@ -12,6 +22,8 @@ Double-click `Start-Automation.bat`. Requires Python 3.11 or later with Tkinter.
 The worker console opens in its own resizable window. Drag its edges or maximize it. Closing the console hides it while logging continues; **Worker Console** reopens it with its current log history.
 
 **Shuffle Pending** randomizes waiting groups before or during a run without changing the active group or completed results. **Skip Current Group** cancels the current browser task and moves to the next group immediately. If submission has already started, the result requires review and is not automatically retried.
+
+**Export Remaining CSV** saves a snapshot of waiting groups in queue order, preserving all original CSV columns and post text. It excludes the active group and finished results. You can import this CSV again later. During a run, the snapshot is taken when you click the button, before the save dialog opens.
 
 Set **Composer timeout (seconds)** from 1–300 (default 15). Turn **Join groups automatically** off to attempt posting without requesting membership. Timeout and joining settings are captured when you start the worker; changes apply to the next run.
 
