@@ -1,5 +1,4 @@
-#Facebook Groups Auto Mooch
-
+<img width="202" height="69" alt="Screenshot 2026-10-06 090935" src="https://github.com/user-attachments/assets/861caedc-928a-42c0-b01a-5b0871ab311f" />
 ## Windows EXE
 
 Download `AutoMooch.exe` from the repository's GitHub Releases page and double-click it. Python is not required. Microsoft Edge or Google Chrome must be installed for the worker. Download `sample CSV.csv` from the repository separately if needed.
