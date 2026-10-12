@@ -165,7 +165,7 @@ async def join_group(page, on_step, answers, accept_rules, timeout_ms=15000):
         async with asyncio.timeout(timeout_ms / 1000):
             await _join_group(page, on_step, answers, accept_rules, timeout_ms)
     except TimeoutError as error:
-        raise AutomationError("JOIN_PENDING", "Membership check timed out; skipping this group.") from error
+        raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "Membership check timed out; attempting to find the post composer.") from error
 
 
 async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
@@ -175,7 +175,7 @@ async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
     joined = page.get_by_role("button", name=re.compile(r"^(joined|member)$", re.I))
     ready = await first_visible(page, [join, joined, pending, composer_triggers(page)], timeout_ms)
     if not ready:
-        raise AutomationError("COMPOSER_NOT_FOUND", "No membership controls or composer appeared before the timeout.")
+        raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "No membership controls or composer appeared before the timeout.")
     if await pending.filter(visible=True).first.is_visible():
         raise AutomationError("JOIN_PENDING", "Membership approval is pending; skipping this group.")
     button = join.filter(visible=True).first
@@ -186,7 +186,7 @@ async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
     await button.click(timeout=5000)
     outcome = await first_visible(page, [page.get_by_role("dialog"), pending, joined], timeout_ms)
     if not outcome:
-        raise AutomationError("JOIN_PENDING", "No join confirmation appeared; review the group manually.")
+        raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "No join confirmation appeared before the timeout.")
     dialog = page.get_by_role("dialog").filter(visible=True).first
     if await dialog.is_visible():
         await answer_membership_form(dialog, answers, accept_rules, on_step)
@@ -211,7 +211,12 @@ async def post_to_facebook(page, job: dict, on_step: Callable[[str], None] = lam
         if re.search(r"content isn't available|page isn't available", body, re.I):
             raise AutomationError("GROUP_NOT_FOUND", "The group is unavailable or inaccessible.")
         if join_before_post:
-            await join_group(page, on_step, membership_answers or [], accept_group_rules, composer_timeout_ms)
+            try:
+                await join_group(page, on_step, membership_answers or [], accept_group_rules, composer_timeout_ms)
+            except AutomationError as error:
+                if error.code != "MEMBERSHIP_CHECK_TIMEOUT":
+                    raise
+                on_step("Membership check timed out; trying to post to this group before continuing...")
         editor = await prepare_composer(page, on_step, composer_timeout_ms)
         dialog = page.get_by_role("dialog")
         on_step("Entering post text...")
