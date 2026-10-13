@@ -103,6 +103,25 @@ The EXE stores login data, progress, logs, and failure screenshots in `%LOCALAPP
 
 ## Run from source
 
+### Separate Facebook group CSV scanner
+
+For Windows without Python, **[download FacebookGroupScanner.exe from the latest release](https://github.com/DevSkits916/FB-Group-Auto-Mooch/releases/latest)** and double-click it. Installed Edge or Chrome is required. The scanner has the Auto Mooch artwork and uses a separate login profile from the poster. Its private profile, results, logs and screenshots are saved in `%LOCALAPPDATA%\AutoMoochFacebookScanner`. The EXE is unsigned and may trigger SmartScreen; release checksums verify integrity.
+
+Double-click `Start-Facebook-Group-Scanner.bat` in the project folder to open the separate scanner app. It shares the installed Python dependencies but uses its own private browser profile.
+
+1. Click **Open Login**, sign in to Facebook, then press **Stop** to save the scanner session.
+2. Enter search terms, one per line, and choose a result maximum and duration per search.
+3. Click **Start Scan**. The worker collects group names and URLs from Facebook group-search results and deduplicates them across searches. Results are saved automatically; Stop keeps collected results.
+4. Click **Export CSV** to save the collected groups.
+
+The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
+
+The window is resizable, and visible/headless scanning is supported after login. Collection depends on the results Facebook exposes; it does not guarantee a complete group directory. Login, verification and access restrictions are reported rather than bypassed. Private results, logs, profile and failure screenshots are stored under `data/scanner` for source runs. A frozen scanner uses `%LOCALAPPDATA%\AutoMoochFacebookScanner`.
+
+Run scanner tests with `.\.venv\Scripts\python.exe -m unittest -v test_facebook_scanner`. Local tests cover collection, deduplication and CSV compatibility after adding post text; authenticated live Facebook collection remains unverified.
+
+`build.ps1` builds both `AutoMooch.exe` and `FacebookGroupScanner.exe` into `releases`, alongside `SHA256SUMS.txt`. Releases contain both apps. Keep the scanner's metadata export separate from the poster's CSV until you add your own post text.
+
 Requires Python 3.11 or later with Tkinter. Download or clone this repository, then double-click `Start-Automation.bat`. The launcher sets up the environment, installs Playwright and Chromium, and starts the app.
 
 Alternatively, run these PowerShell commands from the repository folder:
