@@ -1,4 +1,5 @@
-<img width="1348" height="708" alt="Screenshot 2026-10-12 181049" src="https://github.com/user-attachments/assets/a7ed6b93-6b9b-47b2-842a-2e83341d244d" />
+<img width="890" height="624" alt="Screenshot 2026-10-13 121421" src="https://github.com/user-attachments/assets/b6d96f7e-dcc0-476e-8bd7-a4d9b05aca17" />
+
 
 
 # Auto Mooch
