@@ -16,7 +16,7 @@ The EXE is unsigned, so Windows may display a publisher or SmartScreen warning. 
 
 ### Option 1: Use the sample CSV
 
-If you do not have your own CSV, **[download sample CSV.csv](https://raw.githubusercontent.com/DevSkits916/FB-Group-Auto-Mooch/main/sample%20CSV.csv)**. You can also **[view the sample in the repository](https://github.com/DevSkits916/FB-Group-Auto-Mooch/blob/main/sample%20CSV.csv)**.
+If you do not have your own CSV, **[download sample CSV.csv](https://raw.githubusercontent.com/DevSkits916/FB-Group-Auto-Mooch/main/sample%20CSV.csv)**..
 
 The sample already contains group URLs and posts. Review the groups and replace the sample post text with your own message before starting the worker.
 
