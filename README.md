@@ -1,4 +1,4 @@
-<img width="202" height="69" alt="Screenshot 2026-10-06 090935" src="https://github.com/user-attachments/assets/861caedc-928a-42c0-b01a-5b0871ab311f" />
+<img width="1254" height="1254" alt="Auto Mooch Robot Automation Icon" src="https://github.com/user-attachments/assets/5ed43300-d4dc-4eb1-b535-f3ddfcb281bb" />
 
 # Auto Mooch
 
