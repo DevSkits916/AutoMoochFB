@@ -130,7 +130,7 @@ class Checks(unittest.TestCase):
                     manager.__aexit__ = AsyncMock(return_value=None)
                     with tempfile.TemporaryDirectory() as folder:
                         app.history_path = Path(folder) / 'progress.json'
-                        with patch('app.async_playwright', return_value=manager), patch.object(page, 'screenshot', new=AsyncMock()):
+                        with patch('app.async_playwright', return_value=manager), patch('app.PROFILE', Path(folder) / 'profile'), patch('app.DATA', Path(folder)), patch.object(page, 'screenshot', new=AsyncMock()):
                             await app.run(False, True, 0, [], join_groups=False)
                     self.assertTrue(app.stop.is_set())
                     self.assertEqual(app.pending, [1])
