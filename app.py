@@ -82,7 +82,7 @@ class App:
         self.status = tk.StringVar(value='Ready • import a CSV to begin')
         self.task = tk.StringVar(value='No current task')
         self.counts = tk.StringVar(value='Complete 0     Failed 0     Skipped 0     Remaining 0')
-        self.delay = tk.StringVar(value='30')
+        self.delay = tk.StringVar(value='8')
         self.composer_seconds = tk.StringVar(value='15')
         self.join_groups = tk.BooleanVar(value=True)
         root.title('Auto Mooch')
@@ -172,11 +172,10 @@ class App:
         ttk.Entry(opts, textvariable=self.composer_seconds, width=7).grid(row=1, column=1, sticky='e')
         ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=2, column=0, sticky='w', pady=(6, 0))
         ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=3, column=0, columnspan=2, sticky='w', pady=(4, 0))
-        console_frame = ttk.Frame(self.panes, padding=12, width=440)
-        self.panes.add(console_frame, weight=2)
-        ttk.Label(console_frame, text='Worker console', style='HUD.TLabel').pack(anchor='w', pady=(0, 8))
-        self.console = ScrolledText(console_frame, width=35, bg='#17202b', fg='#dce7f3', font=('Consolas', 10), state='disabled')
-        self.console.pack(fill='both', expand=True)
+        self.console_window = None
+        self.console_frame = None
+        self.create_console(self.panes)
+        self.panes.add(self.console_frame, weight=2)
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.poll)
 
@@ -192,6 +191,41 @@ class App:
 
     def log(self, text):
         self.events.put(('log', str(text)))
+
+    def create_console(self, parent, content='', position=None):
+        self.console_frame = ttk.Frame(parent, padding=12, width=440)
+        bar = ttk.Frame(self.console_frame)
+        bar.pack(fill='x', pady=(0, 8))
+        ttk.Label(bar, text='Worker console', style='HUD.TLabel').pack(side='left')
+        ttk.Button(bar, text='Attach console' if self.console_window else 'Detach console', command=self.toggle_console).pack(side='right')
+        self.console = ScrolledText(self.console_frame, width=35, bg='#17202b', fg='#dce7f3', font=('Consolas', 10))
+        self.console.insert('1.0', content)
+        self.console.configure(state='disabled')
+        self.console.pack(fill='both', expand=True)
+        if position is not None:
+            self.console.yview_moveto(position)
+
+    def toggle_console(self):
+        content = self.console.get('1.0', 'end-1c')
+        position = self.console.yview()[0]
+        if self.console_window is None:
+            self.panes.forget(self.console_frame)
+            self.console_frame.destroy()
+            self.console_window = tk.Toplevel(self.root)
+            self.console_window.title('Auto Mooch • Worker console')
+            self.console_window.geometry('850x450')
+            self.console_window.minsize(360, 220)
+            self.console_window.resizable(True, True)
+            self.console_window.protocol('WM_DELETE_WINDOW', self.toggle_console)
+            self.create_console(self.console_window, content, position)
+            self.console_frame.pack(fill='both', expand=True)
+        else:
+            window = self.console_window
+            self.console_frame.destroy()
+            self.console_window = None
+            self.create_console(self.panes, content, position)
+            self.panes.add(self.console_frame, weight=2)
+            window.destroy()
 
     def alert_posting_restriction(self, message):
         self.status.set(message)
@@ -209,6 +243,9 @@ class App:
         threading.Thread(target=sound, name='posting-limit-alarm', daemon=True).start()
 
     def show_console(self):
+        if self.console_window is not None:
+            self.console_window.deiconify()
+            self.console_window.lift()
         self.console.focus_set()
 
     def shuffle_pending(self):
@@ -369,6 +406,19 @@ class App:
                         submitted = False
                         def step(text):
                             nonlocal submitted
+                            if text.startswith('No saved answer for membership question:'):
+                                question = text.partition(':')[2].strip()
+                                unanswered_path = DATA / 'unanswered-questions.json'
+                                try:
+                                    unanswered = json.loads(unanswered_path.read_text('utf-8')) if unanswered_path.exists() else []
+                                    record = {'question': question, 'group': job['name'], 'url': job['groupUrl']}
+                                    if record not in unanswered:
+                                        unanswered.append(record)
+                                        temp = unanswered_path.with_suffix('.tmp')
+                                        temp.write_text(json.dumps(unanswered, indent=2), encoding='utf-8')
+                                        temp.replace(unanswered_path)
+                                except (ValueError, OSError) as error:
+                                    self.log(f'Could not save unanswered question: {error}')
                             if text == 'Submitting post...':
                                 submitted = True
                                 self.save(job['id'], 'Review: interrupted during submission')
@@ -396,7 +446,7 @@ class App:
                                 self.halt_reason = 'Stopped • Facebook posting limit detected'
                                 self.stop.set()
                                 self.events.put(('alert', self.halt_reason))
-                            prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND'} or security else 'Failed')
+                            prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND', 'GROUP_UNAVAILABLE'} or security else 'Failed')
                             state = f'{prefix}: {error.code}'
                             self.log(str(error))
                         except Exception as error:

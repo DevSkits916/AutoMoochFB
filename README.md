@@ -87,7 +87,9 @@ CSV files require `URL` and `post` columns, matched case insensitively. `Group N
 | **Skip Current Group** | Cancels the current task and continues. If submission has started, the result requires review. |
 | **Export Remaining CSV** | Saves waiting groups in queue order with their original columns and posts. Excludes the active group and finished results. |
 
-Settings are captured when you start the worker; changes apply to the next run. Export takes a snapshot when you click the button, before the save dialog opens. Drag the divider between the queue and console to adjust their widths.
+Settings are captured when you start the worker; changes apply to the next run. The default interval between groups is 8 seconds. Export takes a snapshot when you click the button, before the save dialog opens. Drag the divider to resize the console, or click **Detach console** to open it in a separate resizable window. **Attach console** or closing the detached window puts it back; current logs are retained.
+
+Membership question detection ignores generic “Write an answer…” placeholders and reads the surrounding question. Supported native and ARIA radio choices, Yes/No checkbox choices, rule checkboxes and participation questions are handled with saved answers. Missing questions are recorded privately in `unanswered-questions.json` in the app's data folder for review. Paused groups and groups that disallow Pages are skipped with a specific reason; the app does not switch identities automatically. Security detection checks the checkpoint URL or verification controls/headings rather than treating ordinary feed posts as a checkpoint.
 
 If membership checking times out, the worker still looks for the composer and attempts to post in that same group before continuing. The composer receives its own timeout. Explicit pending membership approval and unknown membership questions still skip the group. The answers editor has been removed; previously saved truthful mappings in the private `answers.txt` file still work.
 
