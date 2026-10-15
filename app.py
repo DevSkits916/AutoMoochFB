@@ -163,10 +163,16 @@ class App:
         self.table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
         self.settings_button = ttk.Button(frame, text='Show worker settings', command=self.toggle_settings)
         self.settings_button.grid(row=6, column=0, sticky='ew', pady=(10, 0))
-        opts = ttk.LabelFrame(frame, text='Worker settings', padding=10)
+        self.settings_window = tk.Toplevel(root)
+        self.settings_window.withdraw()
+        self.settings_window.title('Auto Mooch • Worker settings')
+        self.settings_window.transient(root)
+        self.settings_window.minsize(410, 260)
+        self.settings_window.resizable(True, True)
+        self.settings_window.protocol('WM_DELETE_WINDOW', self.settings_window.withdraw)
+        opts = ttk.LabelFrame(self.settings_window, text='Worker settings', padding=16)
         self.settings_frame = opts
-        opts.grid(row=7, column=0, sticky='ew', pady=(8, 0))
-        opts.grid_remove()
+        opts.pack(fill='both', expand=True, padx=12, pady=12)
         opts.columnconfigure(1, weight=1)
         ttk.Label(opts, text='Between groups (seconds)').grid(row=0, column=0, sticky='w', pady=3)
         ttk.Entry(opts, textvariable=self.delay, width=7).grid(row=0, column=1, sticky='e')
@@ -174,6 +180,8 @@ class App:
         ttk.Entry(opts, textvariable=self.composer_seconds, width=7).grid(row=1, column=1, sticky='e')
         ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=2, column=0, sticky='w', pady=(6, 0))
         ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=3, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=4, column=0, columnspan=2, sticky='w', pady=(14, 8))
+        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=5, column=0, columnspan=2, sticky='e')
         self.console_window = None
         self.console_frame = None
         self.create_console(self.panes)
@@ -182,14 +190,9 @@ class App:
         root.after(100, self.poll)
 
     def toggle_settings(self):
-        if self.settings_frame.winfo_ismapped():
-            self.settings_frame.grid_remove()
-            self.settings_button.configure(text='Show worker settings')
-            self.root.minsize(900, 600)
-        else:
-            self.settings_frame.grid()
-            self.settings_button.configure(text='Hide worker settings')
-            self.root.minsize(900, 800)
+        self.settings_window.deiconify()
+        self.settings_window.lift()
+        self.settings_window.focus_set()
 
     def log(self, text):
         self.events.put(('log', str(text)))

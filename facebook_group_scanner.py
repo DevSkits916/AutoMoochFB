@@ -34,20 +34,30 @@ def group_url(value):
     return 'https://www.facebook.com/groups/' + match[1]
 
 
+def clean_group_name(value, url):
+    name = ' '.join(str(value or '').split())
+    # Facebook's avatar links use this accessibility label instead of a title.
+    name = re.sub(r'^Profile photo of\s+', '', name, flags=re.IGNORECASE).strip()[:200]
+    if not name or name.casefold() in {'join', 'join group', 'view group', 'visit', 'see more', 'profile photo of'}:
+        return url.rsplit('/', 1)[-1]
+    return name
+
+
 def parse_links(links):
     found = {}
+    priorities = {}
     for item in links:
         href = item.get('href', '') if isinstance(item, dict) else item
         url = group_url(href)
         if not url:
             continue
         text = item.get('text', '') if isinstance(item, dict) else ''
-        name = ' '.join(text.split()).strip()[:200]
-        if not name or name.casefold() in {'join', 'join group', 'view group', 'visit', 'see more'}:
-            name = url.rsplit('/', 1)[-1]
+        name = clean_group_name(text, url)
+        priority = 0 if name == url.rsplit('/', 1)[-1] else (1 if re.match(r'^Profile photo of\s+', ' '.join(text.split()), re.IGNORECASE) else 2)
         key = url.casefold()
-        if key not in found or found[key]['name'] == url.rsplit('/', 1)[-1]:
+        if key not in found or priority > priorities[key]:
             found[key] = {'name': name, 'url': url}
+            priorities[key] = priority
     return list(found.values())
 
 
@@ -58,7 +68,7 @@ def export_csv(path, groups):
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
         for group in groups:
-            writer.writerow({'Group Name': group['name'], 'URL': group['url']})
+            writer.writerow({'Group Name': clean_group_name(group['name'], group['url']), 'URL': group['url']})
     return len(groups)
 
 
@@ -191,6 +201,7 @@ class Scanner:
         for row in rows:
             key = row['url'].casefold()
             if key not in self.results and group_url(row['url']):
+                row = dict(row, name=clean_group_name(row['name'], row['url']))
                 self.results[key] = row
                 self.table.insert('', 'end', values=(row['name'], row['url']))
 

@@ -69,7 +69,7 @@ Auto Mooch uses the post text in the imported file; it does not generate posts w
 ## Import and run
 
 1. Click **Import CSV** and select your prepared file or edited sample.
-2. Check the loaded groups and choose your settings.
+2. Check the loaded groups and click **Show worker settings** to open a separate, resizable settings window. Choose your settings, then close that window when finished; your choices are retained for the session.
 3. Click **Start Worker**. Follow the current task, progress counts, and console logs.
 4. Click **Stop** to finish the current group and stop the queue, or **Skip Current Group** to cancel the current task and continue.
 
