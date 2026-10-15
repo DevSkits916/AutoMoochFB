@@ -15,7 +15,21 @@ Auto Mooch is a Windows app that imports Facebook group URLs and post text from 
 3. Click **Open Login**, sign in to Facebook in the browser, then click **Stop** in Auto Mooch to close the browser and save the session.
 
 The EXE is unsigned, so Windows may display a publisher or SmartScreen warning. Releases include `SHA256SUMS.txt` for file integrity verification.
+## Facebook group CSV scanner
 
+![Facebook Group Scanner showing collected group names and URLs](assets/screenshots/facebook-group-scanner.png)
+
+For Windows without Python, **[download FacebookGroupScanner.exe from the latest release](https://github.com/DevSkits916/FB-Group-Auto-Mooch/releases/latest)** and double-click it. Installed Edge or Chrome is required. The EXE is unsigned and may trigger SmartScreen; release checksums verify integrity.
+
+For source installations, double-click `Start-Facebook-Group-Scanner.bat` in the project folder. It uses the same installed Python dependencies as the poster.
+
+1. If either app has a browser open, press **Stop** there and wait for it to close.
+2. Click **Open Login**, sign in to Facebook if needed, then press **Stop** to save the shared session. If you already signed in through Auto Mooch, the scanner reuses that login.
+3. Enter search terms, one per line, and choose **Maximum per search** and **Seconds per search**. Leave **Headless** off to watch the scan, or enable it after login.
+4. Click **Start Scan**. The worker collects group names and URLs from Facebook group-search results and deduplicates them across searches. Results are saved automatically; **Stop** retains collected results. **Clear Results** starts a fresh collection when the worker is idle.
+5. Click **Export CSV** and choose where to save the collected groups. Add a `post` column afterward, then use **Import CSV** in Auto Mooch.
+
+The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
 ## Choose your CSV
 
 ### Option 1: Use the sample CSV
@@ -94,7 +108,7 @@ Membership question detection ignores generic “Write an answer…” placehold
 If membership checking times out, the worker still looks for the composer and attempts to post in that same group before continuing. The composer receives its own timeout. Explicit pending membership approval and unknown membership questions still skip the group. The answers editor has been removed; previously saved truthful mappings in the private `answers.txt` file still work.
 
 ## Posting limits and saved results
-
+<img width="566" height="342" alt="Screenshot 2026-10-14 190556" src="https://github.com/user-attachments/assets/551640fe-eee2-4d91-85b5-1b0eb6b1f82b" />
 If Facebook displays **“We limit how often you can post…”** in the composer after submission, Auto Mooch stops before opening another group, sounds a repeating Windows beep, and shows a posting-limit status. The current post requires review; remaining groups stay queued. Resolve the restriction before restarting.
 
 Login, CAPTCHA, identity checks, administrator approval, and unknown membership questions may require attention. English Facebook controls are supported; changes to Facebook's interface may require updates.
@@ -103,21 +117,7 @@ Login, CAPTCHA, identity checks, administrator approval, and unknown membership 
 
 The EXE stores login data, progress, logs, and failure screenshots in `%LOCALAPPDATA%\AutoMooch`. Source installations use the `data` folder instead. Keep those files private, avoid running multiple instances against the same profile, and check Facebook before changing saved progress to repeat a post.
 
-## Facebook group CSV scanner
 
-![Facebook Group Scanner showing collected group names and URLs](assets/screenshots/facebook-group-scanner.png)
-
-For Windows without Python, **[download FacebookGroupScanner.exe from the latest release](https://github.com/DevSkits916/FB-Group-Auto-Mooch/releases/latest)** and double-click it. Installed Edge or Chrome is required. The EXE is unsigned and may trigger SmartScreen; release checksums verify integrity.
-
-For source installations, double-click `Start-Facebook-Group-Scanner.bat` in the project folder. It uses the same installed Python dependencies as the poster.
-
-1. If either app has a browser open, press **Stop** there and wait for it to close.
-2. Click **Open Login**, sign in to Facebook if needed, then press **Stop** to save the shared session. If you already signed in through Auto Mooch, the scanner reuses that login.
-3. Enter search terms, one per line, and choose **Maximum per search** and **Seconds per search**. Leave **Headless** off to watch the scan, or enable it after login.
-4. Click **Start Scan**. The worker collects group names and URLs from Facebook group-search results and deduplicates them across searches. Results are saved automatically; **Stop** retains collected results. **Clear Results** starts a fresh collection when the worker is idle.
-5. Click **Export CSV** and choose where to save the collected groups. Add a `post` column afterward, then use **Import CSV** in Auto Mooch.
-
-The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
 
 The window is resizable. Collection depends on the results Facebook exposes; it does not guarantee a complete group directory. Login, verification and access restrictions are reported rather than bypassed. Scanner results, logs and failure screenshots remain separate under `data/scanner` for source runs or `%LOCALAPPDATA%\AutoMoochFacebookScanner` for the EXE.
 
