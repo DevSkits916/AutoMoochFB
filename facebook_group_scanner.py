@@ -15,7 +15,8 @@ from tkinter.scrolledtext import ScrolledText
 from urllib.parse import quote, urljoin, urlparse
 from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout
 from facebook import AutomationError, CHECKPOINT, CAPTCHA
-from app import browser_options, smoke_browser
+from app import browser_options, smoke_browser, PROFILE
+from browser_profile import profile_lease
 
 ROOT = Path(__file__).resolve().parent
 DATA = (Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'AutoMoochFacebookScanner') if getattr(sys, 'frozen', False) else ROOT / 'data' / 'scanner'
@@ -243,13 +244,13 @@ class Scanner:
     async def run(self, login, headless, terms, limit, seconds):
         log = lambda text: self.events.put(('log', text))
         try:
-            async with async_playwright() as pw:
-                context = await pw.chromium.launch_persistent_context(str(DATA / 'profile'), headless=headless, viewport={'width': 1400, 'height': 950}, **browser_options())
+            async with async_playwright() as pw, profile_lease(PROFILE):
+                context = await pw.chromium.launch_persistent_context(str(PROFILE), headless=headless, viewport={'width': 1400, 'height': 950}, **browser_options())
                 try:
                     page = context.pages[0] if context.pages else await context.new_page()
                     if login:
                         await page.goto('https://www.facebook.com/', wait_until='domcontentloaded', timeout=45000)
-                        log('Sign in, then press Stop to save the scanner session. This profile is separate from the poster.')
+                        log('Sign in, then press Stop to save the shared session. Auto Mooch and the scanner use the same browser profile.')
                         while not self.stop.is_set() and context.pages:
                             await asyncio.sleep(.25)
                     else:

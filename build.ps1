@@ -10,7 +10,7 @@ if ($LASTEXITCODE) { throw 'pip setup failed' }
 if ($LASTEXITCODE) { throw 'Dependency installation failed' }
 & .venv/Scripts/python.exe -m playwright install chromium
 if ($LASTEXITCODE) { throw 'Browser installation failed' }
-& .venv/Scripts/python.exe -m unittest -v test_app test_facebook_scanner test_worker_fixes
+& .venv/Scripts/python.exe -m unittest -v test_app test_facebook_scanner test_worker_fixes test_browser_profile
 if ($LASTEXITCODE) { throw 'Tests failed' }
 & .venv/Scripts/python.exe -m PyInstaller --noconfirm --onefile --windowed --name AutoMooch --icon "$PSScriptRoot/assets/AutoMooch.ico" --add-data "$PSScriptRoot/assets;assets" --distpath releases --workpath build/pyinstaller --specpath build --collect-all playwright app.py
 if ($LASTEXITCODE) { throw 'Executable build failed' }

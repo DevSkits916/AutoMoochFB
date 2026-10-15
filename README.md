@@ -103,26 +103,37 @@ Login, CAPTCHA, identity checks, administrator approval, and unknown membership 
 
 The EXE stores login data, progress, logs, and failure screenshots in `%LOCALAPPDATA%\AutoMooch`. Source installations use the `data` folder instead. Keep those files private, avoid running multiple instances against the same profile, and check Facebook before changing saved progress to repeat a post.
 
-## Run from source
+## Facebook group CSV scanner
 
-### Separate Facebook group CSV scanner
+![Facebook Group Scanner showing collected group names and URLs](assets/screenshots/facebook-group-scanner.png)
 
-For Windows without Python, **[download FacebookGroupScanner.exe from the latest release](https://github.com/DevSkits916/FB-Group-Auto-Mooch/releases/latest)** and double-click it. Installed Edge or Chrome is required. The scanner has the Auto Mooch artwork and uses a separate login profile from the poster. Its private profile, results, logs and screenshots are saved in `%LOCALAPPDATA%\AutoMoochFacebookScanner`. The EXE is unsigned and may trigger SmartScreen; release checksums verify integrity.
+For Windows without Python, **[download FacebookGroupScanner.exe from the latest release](https://github.com/DevSkits916/FB-Group-Auto-Mooch/releases/latest)** and double-click it. Installed Edge or Chrome is required. The EXE is unsigned and may trigger SmartScreen; release checksums verify integrity.
 
-Double-click `Start-Facebook-Group-Scanner.bat` in the project folder to open the separate scanner app. It shares the installed Python dependencies but uses its own private browser profile.
+For source installations, double-click `Start-Facebook-Group-Scanner.bat` in the project folder. It uses the same installed Python dependencies as the poster.
 
-1. Click **Open Login**, sign in to Facebook, then press **Stop** to save the scanner session.
-2. Enter search terms, one per line, and choose a result maximum and duration per search.
-3. Click **Start Scan**. The worker collects group names and URLs from Facebook group-search results and deduplicates them across searches. Results are saved automatically; Stop keeps collected results.
-4. Click **Export CSV** to save the collected groups.
+1. If either app has a browser open, press **Stop** there and wait for it to close.
+2. Click **Open Login**, sign in to Facebook if needed, then press **Stop** to save the shared session. If you already signed in through Auto Mooch, the scanner reuses that login.
+3. Enter search terms, one per line, and choose **Maximum per search** and **Seconds per search**. Leave **Headless** off to watch the scan, or enable it after login.
+4. Click **Start Scan**. The worker collects group names and URLs from Facebook group-search results and deduplicates them across searches. Results are saved automatically; **Stop** retains collected results. **Clear Results** starts a fresh collection when the worker is idle.
+5. Click **Export CSV** and choose where to save the collected groups. Add a `post` column afterward, then use **Import CSV** in Auto Mooch.
 
 The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
 
-The window is resizable, and visible/headless scanning is supported after login. Collection depends on the results Facebook exposes; it does not guarantee a complete group directory. Login, verification and access restrictions are reported rather than bypassed. Private results, logs, profile and failure screenshots are stored under `data/scanner` for source runs. A frozen scanner uses `%LOCALAPPDATA%\AutoMoochFacebookScanner`.
+The window is resizable. Collection depends on the results Facebook exposes; it does not guarantee a complete group directory. Login, verification and access restrictions are reported rather than bypassed. Scanner results, logs and failure screenshots remain separate under `data/scanner` for source runs or `%LOCALAPPDATA%\AutoMoochFacebookScanner` for the EXE.
+
+### Shared Facebook login
+
+Both EXEs now use the poster's existing browser profile at `%LOCALAPPDATA%\AutoMooch\profile`. Both source launchers use `data/profile` in the project folder. The scanner no longer creates its own browser profile. Your existing Auto Mooch login is preserved; old scanner profile directories are left untouched and are no longer used.
+
+Only one browser instance can use this profile at a time. You can leave both dashboards open, but press **Stop** in the app using the browser and wait for it to close before opening login or starting work in the other app. If the profile is busy, the app explains how to release it. Upgrade both EXEs together so both participate in the shared-profile protection.
+
+Switching between a source installation and EXE installation still follows their respective profile locations listed above. No cookies or private profile data are included in GitHub or the releases.
 
 Run scanner tests with `.\.venv\Scripts\python.exe -m unittest -v test_facebook_scanner`. Local tests cover collection, deduplication and CSV compatibility after adding post text; authenticated live Facebook collection remains unverified.
 
 `build.ps1` builds both `AutoMooch.exe` and `FacebookGroupScanner.exe` into `releases`, alongside `SHA256SUMS.txt`. Releases contain both apps. Keep the scanner's metadata export separate from the poster's CSV until you add your own post text.
+
+## Run from source
 
 Requires Python 3.11 or later with Tkinter. Download or clone this repository, then double-click `Start-Automation.bat`. The launcher sets up the environment, installs Playwright and Chromium, and starts the app.
 

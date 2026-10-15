@@ -16,10 +16,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from facebook import post_to_facebook, AutomationError
+from browser_profile import profile_lease, ProfileBusyError
 
 ROOT = Path(__file__).resolve().parent
 DATA = (Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'AutoMooch') if getattr(sys, 'frozen', False) else ROOT / 'data'
 DATA.mkdir(exist_ok=True)
+PROFILE = DATA / 'profile'
 
 
 def browser_options():
@@ -377,8 +379,8 @@ class App:
 
     async def run(self, login, headless, delay, answers, composer_seconds=15, join_groups=True):
         try:
-            async with async_playwright() as pw:
-                context = await pw.chromium.launch_persistent_context(str(DATA / 'profile'), headless=headless, viewport={'width': 1440, 'height': 1000}, **browser_options())
+            async with async_playwright() as pw, profile_lease(PROFILE):
+                context = await pw.chromium.launch_persistent_context(str(PROFILE), headless=headless, viewport={'width': 1440, 'height': 1000}, **browser_options())
                 try:
                     page = context.pages[0] if context.pages else await context.new_page()
                     if login:
@@ -475,6 +477,8 @@ class App:
                 finally:
                     await context.close()
         except Exception as error:
+            if isinstance(error, ProfileBusyError):
+                self.halt_reason = 'Browser profile in use • stop the other app first'
             self.log(f'Worker error: {error}')
         finally:
             self.events.put(('done',))
