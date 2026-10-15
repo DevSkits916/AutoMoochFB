@@ -50,7 +50,7 @@ Use the **[FBGroups2CSV Chrome extension](https://github.com/DevSkits916/FBGroup
 The extension exports group information, including `Group Name` and `URL`. **It does not add post text.** Add a column named `post` and fill it for every group before importing the file into Auto Mooch.
 
 ## Add the post column with AI
-
+<img width="508" height="281" alt="Screenshot 2026-10-14 220458" src="https://github.com/user-attachments/assets/b065cf9e-5145-4303-a80f-5a3bb511d0e0" />
 You can use ChatGPT or another AI assistant that accepts CSV files to prepare posts for all the groups in your export:
 
 1. Upload the CSV exported by FBGroups2CSV.
