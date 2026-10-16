@@ -30,30 +30,14 @@ For source installations, double-click `Start-Facebook-Group-Scanner.bat` in the
 5. Click **Export CSV** and choose where to save the collected groups. Add a `post` column afterward, then use **Import CSV** in Auto Mooch.
 
 The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
+
 ## Choose your CSV
-
-### Option 1: Use the sample CSV
-
-If you do not have your own CSV, **[download sample CSV.csv](https://raw.githubusercontent.com/DevSkits916/FB-Group-Auto-Mooch/main/sample%20CSV.csv)**..
-
-The sample already contains group URLs and posts. Review the groups and replace the sample post text with your own message before starting the worker.
-
-### Option 2: Export your own groups with FBGroups2CSV
-
-Use the **[FBGroups2CSV Chrome extension](https://github.com/DevSkits916/FBGroups2CSV)** to collect Facebook groups and export your own CSV. The extension repository includes installation instructions.
-
-1. Download and extract the extension. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**. Select the extension folder containing `manifest.json`.
-2. Sign in to Facebook in Chrome and open a group listing or a search with **Groups** results.
-3. Use **Scan Visible** or **Auto-Scan** in the extension panel to collect groups.
-4. Set **Format** to **CSV** and click **Export**.
-
-The extension exports group information, including `Group Name` and `URL`. **It does not add post text.** Add a column named `post` and fill it for every group before importing the file into Auto Mooch.
 
 ## Add the post column with AI
 <img width="508" height="281" alt="Screenshot 2026-10-14 220458" src="https://github.com/user-attachments/assets/b065cf9e-5145-4303-a80f-5a3bb511d0e0" />
 You can use ChatGPT or another AI assistant that accepts CSV files to prepare posts for all the groups in your export:
 
-1. Upload the CSV exported by FBGroups2CSV.
+1. Upload the CSV exported
 2. Give the AI your message, purpose, and the facts or links it must use. Ask it to add a `post` column for every row and return a downloadable CSV.
 3. Review the output. Make sure every group has post text, the group URLs are unchanged, and the row count matches the original export.
 4. Save the result as a UTF-8 CSV, then import it into Auto Mooch.
