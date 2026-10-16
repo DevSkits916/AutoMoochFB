@@ -131,6 +131,73 @@ When Facebook shows the recognized **“We limit how often you can post…”** 
 
 **Complete** means the composer closed after submission; it does not guarantee public visibility or administrator approval. Completed and uncertain submissions are not automatically retried, including duplicate URL/post combinations. Failed and skipped groups may be retried on a later manual run. Live authenticated Facebook posting and scanning are not covered by the local tests, and Facebook interface changes may require updates. English Facebook controls are supported.
 
+## Data folder, saved answers, and failure logs
+
+Click **Show worker settings → Open data folder** in Auto Mooch. This opens File Explorer directly to the data folder used by that copy of the app, so you can find its answers, logs, saved results, and screenshots.
+
+| File | What it contains |
+| --- | --- |
+| `answers.txt` | Your saved answers for recognized membership and participation questions. |
+| `unanswered-questions.json` | Questions for which no saved answer was found, with the group name and URL. |
+| `worker.log` | Timestamped worker messages, tasks, errors, and group results, appended across runs. |
+| `failure-<job-id>.png` | A browser screenshot captured after a skipped, failed, or review result when possible. |
+| `progress.json` | Saved results used to restore counts and avoid automatically repeating completed or uncertain submissions. |
+| `last-import.csv` | The private copy of your last imported CSV, loaded when Auto Mooch reopens. |
+
+Some files appear only after the corresponding action occurs. For example, the unanswered-question report is created when a missing answer is logged, and screenshots require an open browser page.
+
+### Use and edit answers.txt
+
+1. Press **Stop** and wait for the worker to finish stopping.
+2. Open the data folder and open **`answers.txt`** in a plain-text editor such as Notepad. If it does not exist yet, create it with that exact filename.
+3. Put one question phrase and answer on each line, separated by **`=`**. Replace the bracketed text in these examples with your own answers:
+
+   ```text
+   where do you live = [Your city and country]
+   why do you want to join = [Your truthful reason for joining]
+   ```
+
+4. Save the file as **UTF-8**, keeping the name `answers.txt` rather than `answers.txt.txt`.
+5. Start the worker again. Answers are read at each worker start; changes do not update a run already in progress. No EXE rebuild is needed.
+
+Question phrases are matched case insensitively after normalizing whitespace. The phrase must appear within the detected question, and the longest matching phrase takes priority. Use a specific phrase or the full question to avoid applying an answer to unrelated questions. Conflicting answers for equally specific matches require review. For choice questions, use the displayed option text, such as `Yes`, `No`, or the exact radio-button/select option. Use truthful answers; missing details should be reviewed rather than invented.
+
+### Use unanswered-questions.json
+
+When the worker logs **`No saved answer for membership question:`**, it saves the detected question, group name, and group URL in `unanswered-questions.json`. Duplicate records with the same question, group, and URL are not added again. A record looks like this:
+
+```json
+[
+  {
+    "question": "Where do you live?",
+    "group": "Example group",
+    "url": "https://www.facebook.com/groups/example"
+  }
+]
+```
+
+Open this report, review each question, and add the corresponding `question phrase = answer` line to **`answers.txt`**. The JSON is a report, not an answer file: adding an answer to the JSON does not make the worker use it. You can also give the relevant questions and your factual details to an AI assistant and ask it to draft answer lines, then review them before saving.
+
+The report is not automatically cleared when you add answers, so older questions may remain listed even after they have a matching answer. Incomplete question text or missing choices need manual review. Membership problems still lead to a composer search; if a usable composer is available, the worker attempts the queued post. If the composer itself requires an unanswered participation question, posting cannot continue automatically.
+
+### Read worker logs and failure screenshots
+
+The worker console shows current activity, and **`worker.log`** saves those messages with timestamps such as `[14:05:32]`. It includes membership checks, composer searches, submission steps, error details, group names and result codes, and posting-cooldown messages. The file is appended to across runs; the visible console keeps only a limited amount of recent output.
+
+After a failed, skipped, or review result, the worker tries to save a screenshot named **`failure-<job-id>.png`**. Successful groups and ordinary user-requested skips do not receive a new failure screenshot. If you skip after submission has started, the result is marked for review and a screenshot may be saved. A closed browser or screenshot error can prevent capture. The filename contains the first 12 characters of the job ID rather than the group name; use the screenshot contents and file time alongside the group and error messages in `worker.log`. The same group URL and exact post text produce the same job ID, so a later screenshot for that job replaces its earlier screenshot. A screenshot can therefore document an expected skip or posting restriction, not just a worker error.
+
+To investigate an issue:
+
+1. Stop the worker, open the data folder, and look at the latest entries in **`worker.log`**.
+2. Check the group's result in the dashboard and open its screenshot, if one was captured.
+3. If a saved answer is missing, review **`unanswered-questions.json`**, update **`answers.txt`**, and start the worker again.
+4. If no usable composer is available or posting is explicitly unavailable, the group is skipped. A posting-limit message stops the worker and starts the three-hour countdown. Closing the browser stops the queue and preserves unsubmitted work.
+5. For **Review** results, check Facebook before trying the post again. Submission may already have started or succeeded. Do not clear `progress.json` to bypass the saved-result protection, because doing so can cause duplicate posts.
+
+These files can contain your post text, membership answers, group activity, or screenshots of your signed-in account. Keep the data folder private and share only the relevant, reviewed details when requesting help. The scanner has its own results and diagnostics folder, listed below; Auto Mooch's data-folder button opens the poster's folder.
+
+In the scanner's data folder, **`scanner.log`** stores timestamped scan messages and errors, **`groups.json`** stores collected results, and **`last-failure.png`** is replaced with the latest failed-search screenshot when capture succeeds. Check that log and image together when investigating scanner problems. A startup or browser-closure error may be logged without a screenshot.
+
 ## Shared login and private files
 
 Both EXEs share the Facebook browser profile at `%LOCALAPPDATA%\AutoMooch\profile`. Only one app can use the browser profile at a time. You can keep both dashboards open, but press **Stop** in the app using the browser and wait for it to close before starting the other app's browser.
