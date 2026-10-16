@@ -1,4 +1,4 @@
-<img width="1271" height="729" alt="Screenshot 2026-10-13 132354" src="https://github.com/user-attachments/assets/4dce55c8-264f-4e07-95d8-e9dd4d589b35" />
+![Auto Mooch dashboard with restored CSV, progress percentage, and attached worker console](assets/screenshots/auto-mooch-dashboard.png)
 
 
 
