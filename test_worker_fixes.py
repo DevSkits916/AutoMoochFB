@@ -1,12 +1,126 @@
 import asyncio
+import tempfile
 import tkinter as tk
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from playwright.async_api import async_playwright
 from app import App
-from facebook import answer_membership_form, question_text, post_to_facebook, AutomationError, check_group_availability
+from facebook import answer_membership_form, question_text, post_to_facebook, AutomationError, check_group_availability, membership_is_pending, join_group
 
 
 class FixChecks(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        data_patch = patch('app.DATA', Path(folder.name))
+        data_patch.start()
+        self.addCleanup(data_patch.stop)
+
+    def test_membership_problems_still_post_when_composer_is_available(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    composer = '''<button onclick="document.querySelector('#composer').style.display='block'">Write something</button><div id="composer" role="dialog" style="display:none"><h2>Create post</h2><div role="textbox" contenteditable="true"></div><button onclick="window.posted=document.querySelector('[contenteditable]').innerText; this.parentElement.remove()">Post</button></div>'''
+                    cases = [
+                        '<div>Your membership is pending</div><button>Cancel request</button>',
+                        '<button disabled>Join group</button>',
+                        "<p>This group doesn't allow Pages to join.</p>",
+                        '''<button onclick="document.querySelector('#questions').style.display='block'">Join group</button><div id="questions" role="dialog" style="display:none"><label>An unknown membership question<textarea></textarea></label><button onclick="this.parentElement.remove()">Close</button><button onclick="window.membershipSubmitted=true">Submit</button></div>''',
+                    ]
+                    for prefix in cases:
+                        for join in (True, False):
+                            html = prefix + composer
+                            await page.route('https://www.facebook.com/groups/123', lambda route: route.fulfill(body=html, content_type='text/html'))
+                            steps = []
+                            result = await post_to_facebook(page, {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Exact queued text'}, steps.append, join_before_post=join, composer_timeout_ms=1500)
+                            self.assertEqual(result['status'], 'posted')
+                            self.assertEqual(await page.evaluate('window.posted'), 'Exact queued text')
+                            self.assertFalse(await page.evaluate('Boolean(window.membershipSubmitted)'))
+                            await page.unroute('https://www.facebook.com/groups/123')
+                    opened = '''<div role="dialog"><h2>Create post</h2><div role="textbox" contenteditable="true"></div><button onclick="window.posted=document.querySelector('[contenteditable]').innerText; this.parentElement.remove()">Post</button></div>'''
+                    await page.route('https://www.facebook.com/groups/123', lambda route: route.fulfill(body=opened, content_type='text/html'))
+                    result = await post_to_facebook(page, {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Already open composer'}, composer_timeout_ms=1000)
+                    self.assertEqual(result['status'], 'posted')
+                    self.assertEqual(await page.evaluate('window.posted'), 'Already open composer')
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
+    def test_pending_banner_skips_before_related_groups(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    html = '''<main><h1>Current Group</h1><div>Your membership is pending</div><section><h2>Related groups</h2><button onclick="window.wrongGroup=true">Join group</button></section></main>'''
+                    await page.route('https://www.facebook.com/groups/123', lambda route: route.fulfill(body=html, content_type='text/html'))
+                    for join in (False, True):
+                        with self.assertRaises(AutomationError) as raised:
+                            await post_to_facebook(page, {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Test'}, join_before_post=join, composer_timeout_ms=500)
+                        self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                        self.assertFalse(await page.evaluate('Boolean(window.wrongGroup)'))
+                    await page.set_content('<article><p>Your membership is pending</p><button>Cancel request</button></article>')
+                    self.assertFalse(await membership_is_pending(page))
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
+    def test_pending_membership_questions_use_saved_answers(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    html = '''<div>Your membership is pending</div><button onclick="document.querySelector('[role=dialog]').style.display='block'">Answer questions</button><div role="dialog" style="display:none"><label>Where do you live?<textarea></textarea></label><button onclick="window.answer=document.querySelector('textarea').value; this.parentElement.remove(); document.querySelector('button').remove()">Submit</button></div><section><h2>Related groups</h2><button onclick="window.wrongGroup=true">Join group</button></section>'''
+                    await page.route('https://www.facebook.com/groups/123', lambda route: route.fulfill(body=html, content_type='text/html'))
+                    steps = []
+                    job = {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Test'}
+                    with self.assertRaises(AutomationError) as raised:
+                        await post_to_facebook(page, job, steps.append, join_before_post=True, membership_answers=[{'question': 'where do you live', 'answer': 'Sacramento'}], composer_timeout_ms=1000)
+                    self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                    self.assertEqual(await page.evaluate('window.answer'), 'Sacramento')
+                    self.assertFalse(await page.evaluate('Boolean(window.wrongGroup)'))
+                    with self.assertRaises(AutomationError) as raised:
+                        await post_to_facebook(page, job, steps.append, join_before_post=True, membership_answers=[], composer_timeout_ms=1000)
+                    self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                    self.assertIsNone(await page.evaluate('window.answer'))
+                    self.assertTrue(any('No saved answer' in step for step in steps))
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
+    def test_disabled_join_is_skipped(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    await page.set_content('<div role="button" aria-label="Join group" aria-disabled="true">Join group</div>')
+                    with self.assertRaises(AutomationError) as raised:
+                        await join_group(page, lambda _: None, [], True, 1000)
+                    self.assertEqual(raised.exception.code, 'GROUP_UNAVAILABLE')
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
+    def test_joined_group_ignores_recommended_join_buttons(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    await page.set_content('''<h1>Current group</h1><button>Joined</button><section><h2>Related groups</h2><button onclick="window.wrongGroup=true">Join group</button></section>''')
+                    await join_group(page, lambda _: None, [], True, 1000)
+                    self.assertFalse(await page.evaluate('Boolean(window.wrongGroup)'))
+                    await page.get_by_role('button', name='Join group', exact=True).evaluate("e => e.disabled=true")
+                    await join_group(page, lambda _: None, [], True, 1000)
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
     def test_pages_cannot_post_notice(self):
         async def check():
             async with async_playwright() as pw:

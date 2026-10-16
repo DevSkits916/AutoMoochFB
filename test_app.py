@@ -224,6 +224,45 @@ class Checks(unittest.TestCase):
     def test_posting_limit_stops_worker(self):
         asyncio.run(self.posting_limit())
 
+    def test_browser_closed_preserves_queue_and_submission_review(self):
+        async def check():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                try:
+                    for submitted in (False, True):
+                        root = tk.Tk()
+                        root.withdraw()
+                        try:
+                            app = App(root)
+                            app.history = {}
+                            app.jobs = [dict(id=str(i), name=f'Group {i}', groupUrl=f'https://www.facebook.com/groups/{i}', postText='Test') for i in (123, 456)]
+                            app.pending = [0, 1]
+                            context = await browser.new_context()
+                            await context.new_page()
+                            fake_pw = Mock()
+                            fake_pw.chromium.launch_persistent_context = AsyncMock(return_value=context)
+                            manager = Mock()
+                            manager.__aenter__ = AsyncMock(return_value=fake_pw)
+                            manager.__aexit__ = AsyncMock(return_value=None)
+                            async def close_browser(page, job, on_step, **kwargs):
+                                if submitted:
+                                    on_step('Submitting post...')
+                                await context.close()
+                                raise RuntimeError('Browser closed during task')
+                            with patch('app.async_playwright', return_value=manager), patch('app.PROFILE', app.history_path.parent / 'profile'), patch('app.post_to_facebook', side_effect=close_browser) as post:
+                                await app.run(False, True, 0, [])
+                            post.assert_called_once()
+                            self.assertTrue(app.stop.is_set())
+                            self.assertEqual(app.pending, [1] if submitted else [0, 1])
+                            self.assertTrue(app.history['123'].startswith('Review') if submitted else app.history['123'] == 'Queued')
+                            self.assertNotIn('456', app.history)
+                            self.assertIn('browser closed', app.halt_reason)
+                        finally:
+                            root.destroy()
+                finally:
+                    await browser.close()
+        asyncio.run(check())
+
     async def posting_limit(self):
         root = tk.Tk()
         root.withdraw()
@@ -281,10 +320,9 @@ class Checks(unittest.TestCase):
                 self.assertEqual(await page.locator('body').get_attribute('data-posted'), job['postText'])
                 self.assertTrue(any('Membership check timed out' in step for step in steps))
                 with patch('facebook.join_group', new=AsyncMock(side_effect=AutomationError('JOIN_PENDING', 'Approval pending'))):
-                    with self.assertRaises(AutomationError) as raised:
-                        await post_to_facebook(page, job, join_before_post=True)
-                self.assertEqual(raised.exception.code, 'JOIN_PENDING')
-                self.assertIsNone(await page.locator('body').get_attribute('data-posted'))
+                    result = await post_to_facebook(page, job, join_before_post=True)
+                self.assertEqual(result['status'], 'posted')
+                self.assertEqual(await page.locator('body').get_attribute('data-posted'), job['postText'])
             finally:
                 await browser.close()
 

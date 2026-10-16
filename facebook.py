@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import asyncio
 from collections.abc import Callable
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
+from playwright.async_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, expect
 
 
 class AutomationError(RuntimeError):
@@ -18,7 +18,7 @@ CAPTCHA = re.compile(r"captcha|enter the characters you see", re.I)
 POST_LIMIT = re.compile(r"we limit how often you can (?:post|comment)|you (?:can['’]t|cannot) (?:try again|post) (?:again )?(?:later|right now|at the moment)|temporarily blocked from (?:posting|using this feature)", re.I)
 
 
-async def check_group_availability(page):
+async def check_group_availability(page, *, posting_only=False):
     notices = page.get_by_text(re.compile(
         r"^(?:This group is paused|This group doesn['’]t allow Pages to (?:join|post|participate)|"
         r"Pages (?:can['’]t|cannot) (?:join|post in|participate in) this group|"
@@ -27,7 +27,59 @@ async def check_group_availability(page):
     for index in range(await notices.count()):
         notice = notices.nth(index)
         if not await notice.evaluate("e => !!e.closest('article,[role=article]')"):
-            raise AutomationError('GROUP_UNAVAILABLE', await notice.inner_text())
+            text = await notice.inner_text()
+            if posting_only and re.search(r'\bjoin\b', text, re.I) and not re.search(r'\bpost\b|\bparticipate\b', text, re.I):
+                continue
+            raise AutomationError('GROUP_UNAVAILABLE', text)
+
+
+async def dismiss_membership_dialog(page, on_step):
+    for dialog in await page.get_by_role('dialog').filter(visible=True).all():
+        if await dialog.get_by_text(re.compile(r'^create (?:a )?post$', re.I)).count():
+            continue
+        on_step('Closing membership dialog to check for the post composer...')
+        close = dialog.get_by_role('button', name=re.compile(r'^close(?: dialog)?$', re.I)).filter(visible=True).first
+        try:
+            if await close.is_visible():
+                await close.click(timeout=3000)
+            else:
+                await page.keyboard.press('Escape')
+            await dialog.wait_for(state='hidden', timeout=2000)
+        except PlaywrightError:
+            if page.is_closed():
+                raise
+            on_step('Membership dialog remains open; checking whether a composer is available...')
+
+
+async def membership_is_pending(page):
+    notices = page.get_by_text(re.compile(r'^Your membership is pending\.?$', re.I)).or_(
+        page.get_by_role('button', name=re.compile(r'^(cancel request|pending|request sent)$', re.I)))
+    for notice in await notices.filter(visible=True).all():
+        if not await notice.evaluate("e => !!e.closest('article,[role=article]')"):
+            return True
+    return False
+
+
+async def handle_pending_membership(page, on_step, answers=None, accept_rules=False, *, answer_questions=False):
+    if not await membership_is_pending(page):
+        return
+    if answer_questions:
+        buttons = page.get_by_role('button', name=re.compile(r'^answer questions$', re.I)).filter(visible=True)
+        for button in await buttons.all():
+            if await button.evaluate("e => !!e.closest('article,[role=article]')"):
+                continue
+            on_step('Completing unanswered questions on the pending membership request...')
+            await button.click(timeout=3000)
+            dialog = await first_visible(page, page.get_by_role('dialog'), 5000)
+            if not dialog:
+                raise AutomationError('JOIN_PENDING', 'Pending membership questions did not open; skipping this group.')
+            await answer_membership_form(dialog, answers or [], accept_rules, on_step)
+            joined = page.get_by_role('button', name=re.compile(r'^(joined|member)$', re.I)).filter(visible=True).first
+            if not await membership_is_pending(page) and await joined.is_visible():
+                on_step('Membership approved; checking posting access...')
+                return
+            break
+    raise AutomationError('JOIN_PENDING', 'Membership approval is pending; skipping this group.')
 
 
 async def verify_submission(page, editor, timeout_ms=15000):
@@ -95,6 +147,11 @@ async def prepare_composer(page, on_step, timeout_ms, *, answers=None, accept_ru
     on_step(f"Finding composer (up to {timeout_ms / 1000:g} seconds)...")
     try:
         async with asyncio.timeout(timeout_ms / 1000):
+            editors = page.get_by_role("dialog").locator('[contenteditable="true"]:not([aria-label^="Comment" i]):not([aria-placeholder^="Comment" i])')
+            existing = editors.filter(visible=True).first
+            post_button = page.get_by_role('dialog').get_by_role('button', name=re.compile(r'^(post|publish)$', re.I)).filter(visible=True).first
+            if await existing.is_visible() and await post_button.is_visible():
+                return existing
             trigger = await first_visible(page, [
                 page.get_by_role("button", name=re.compile(r"write something|create (a )?post|what['\u2019]s on your mind", re.I)),
                 page.get_by_text(re.compile(r"write something|what['\u2019]s on your mind", re.I), exact=False),
@@ -102,7 +159,6 @@ async def prepare_composer(page, on_step, timeout_ms, *, answers=None, accept_ru
             if trigger:
                 await trigger.click(timeout=timeout_ms)
                 dialog = page.get_by_role('dialog').filter(visible=True).first
-                editors = page.get_by_role("dialog").locator('[contenteditable="true"]:not([aria-label^="Comment" i]):not([aria-placeholder^="Comment" i])')
                 signal = await first_visible(page, [editors, dialog.get_by_text(re.compile(r'^(?:participant|membership) questions$', re.I))], timeout_ms)
                 if signal and await dialog.get_by_text(re.compile(r'^(?:participant|membership) questions$', re.I)).first.is_visible():
                     on_step('Answering participation questions before opening the composer...')
@@ -250,14 +306,18 @@ async def join_group(page, on_step, answers, accept_rules, timeout_ms=15000):
 
 async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
     on_step("Checking group membership...")
+    await check_group_availability(page)
+    await handle_pending_membership(page, on_step, answers, accept_rules, answer_questions=True)
     pending = page.get_by_role("button", name=re.compile(r"^(cancel request|pending|request sent)$", re.I))
     join = page.get_by_role("button", name=re.compile(r"^join group$", re.I))
     joined = page.get_by_role("button", name=re.compile(r"^(joined|member)$", re.I))
     ready = await first_visible(page, [join, joined, pending, composer_triggers(page)], timeout_ms)
     if not ready:
         raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "No membership controls or composer appeared before the timeout.")
-    if await pending.filter(visible=True).first.is_visible():
-        raise AutomationError("JOIN_PENDING", "Membership approval is pending; skipping this group.")
+    await handle_pending_membership(page, on_step, answers, accept_rules, answer_questions=True)
+    if await joined.filter(visible=True).first.is_visible():
+        on_step("Already joined; finding composer...")
+        return
     button = join.filter(visible=True).first
     if not await button.is_visible():
         on_step("Already joined or no join required; finding composer...")
@@ -265,15 +325,20 @@ async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
     on_step("Requesting group membership...")
     if not await button.is_enabled():
         raise AutomationError('GROUP_UNAVAILABLE', 'Join is disabled. The group may be paused or disallow the active profile type.')
-    await button.click(timeout=5000)
+    try:
+        await button.click(timeout=5000)
+    except PlaywrightTimeoutError:
+        # A group may disable joining between the enabled check and the click.
+        if await button.is_visible() and not await button.is_enabled():
+            raise AutomationError('GROUP_UNAVAILABLE', 'The group disabled joining; skipping this group.')
+        raise
     outcome = await first_visible(page, [page.get_by_role("dialog"), pending, joined], timeout_ms)
     if not outcome:
         raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "No join confirmation appeared before the timeout.")
     dialog = page.get_by_role("dialog").filter(visible=True).first
     if await dialog.is_visible():
         await answer_membership_form(dialog, answers, accept_rules, on_step)
-    if await pending.filter(visible=True).first.is_visible():
-        raise AutomationError("JOIN_PENDING", "Membership request submitted; awaiting administrator approval.")
+    await handle_pending_membership(page, on_step, answers, accept_rules, answer_questions=True)
     on_step("Join action completed; checking posting access...")
 
 
@@ -298,22 +363,31 @@ async def post_to_facebook(page, job: dict, on_step: Callable[[str], None] = lam
         group_controls = page.get_by_role('button', name=re.compile(r'^(?:joined|join group|member)$', re.I)).filter(visible=True).first
         if await unavailable.is_visible() and not await group_controls.is_visible():
             raise AutomationError("GROUP_NOT_FOUND", "The group is unavailable or inaccessible.")
-        await check_group_availability(page)
+        await check_group_availability(page, posting_only=True)
         if join_before_post:
             try:
                 await join_group(page, on_step, membership_answers or [], accept_group_rules, composer_timeout_ms)
             except AutomationError as error:
-                if error.code != "MEMBERSHIP_CHECK_TIMEOUT":
+                if error.security:
                     raise
-                on_step("Membership check timed out; trying to post to this group before continuing...")
+                if error.code == 'MEMBERSHIP_CHECK_TIMEOUT':
+                    on_step("Membership check timed out; trying to post to this group before continuing...")
+                else:
+                    on_step(f'Membership step: {error}. Checking for a post composer anyway...')
+                await dismiss_membership_dialog(page, on_step)
+            except PlaywrightError as error:
+                if page.is_closed():
+                    raise
+                on_step(f'Membership browser error: {error}. Checking for a post composer anyway...')
+                await dismiss_membership_dialog(page, on_step)
         editor = await prepare_composer(page, on_step, composer_timeout_ms, answers=membership_answers, accept_rules=accept_group_rules)
-        await check_group_availability(page)
+        await check_group_availability(page, posting_only=True)
         dialog = page.get_by_role("dialog")
         on_step("Entering post text...")
         await enter_post_text(page, editor, job["postText"])
         post_button = await first_enabled(page, [dialog.get_by_role("button", name=re.compile(r"^(post|publish)$", re.I))])
         if not post_button:
-            await check_group_availability(page)
+            await check_group_availability(page, posting_only=True)
             raise AutomationError("POST_BUTTON_NOT_FOUND", "Post button was not enabled after entering the text.")
         on_step("Submitting post...")
         await post_button.click(timeout=10000)

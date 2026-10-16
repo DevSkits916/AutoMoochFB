@@ -565,10 +565,18 @@ class App:
                             with self.queue_lock:
                                 self.current_task = None
                             self.events.put(('active', False))
+                        if page.is_closed():
+                            self.stop.set()
+                            self.halt_reason = 'Stopped • browser closed; remaining groups kept queued'
+                            if not submitted:
+                                state = 'Queued'
+                                with self.queue_lock:
+                                    self.pending.insert(0, index)
+                            self.log('Browser closed. Stopping the queue; submissions already started remain for review.')
                         self.save(job['id'], state)
                         self.events.put(('result', index, state))
                         self.log(f"{job['name']}: {state}")
-                        if state != 'Complete' and state != 'Skipped: user requested':
+                        if not page.is_closed() and state != 'Complete' and state != 'Skipped: user requested':
                             try:
                                 await page.screenshot(path=str(DATA / f'failure-{job["id"][:12]}.png'))
                             except Exception:
