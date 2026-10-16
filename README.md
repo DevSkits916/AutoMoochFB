@@ -31,9 +31,9 @@ For source installations, double-click `Start-Facebook-Group-Scanner.bat` in the
 
 The scanner exports only `Group Name` and `URL`. It has no post editor and does not generate or add post content. To use the output in Auto Mooch, add a `post` column afterward with your own messages as described above.
 
-## Choose your CSV
+## Choose your OWN CSV OR USE SAMPLE.CSV FROM THE REPO TO TEST WITH
 
-## Add the post column with AI
+## if you have a csv from Facebook Scanner Add the post column to it  with AI
 <img width="508" height="281" alt="Screenshot 2026-10-14 220458" src="https://github.com/user-attachments/assets/b065cf9e-5145-4303-a80f-5a3bb511d0e0" />
 You can use ChatGPT or another AI assistant that accepts CSV files to prepare posts for all the groups in your export:
 
