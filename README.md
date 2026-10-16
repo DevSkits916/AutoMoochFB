@@ -16,6 +16,10 @@ Download these files from the **[latest release](https://github.com/DevSkits916/
 
 Python is not required for the EXEs. Install Microsoft Edge or Google Chrome, and close older app instances before replacing their EXEs. The EXEs are unsigned, so Windows may display a publisher or SmartScreen warning.
 
+## Choose your CSV
+
+Collect your own groups with **Facebook Group Scanner** and add a `post` column using the steps below. You can also use **[sample.csv from this repository](https://github.com/DevSkits916/FB-Group-Auto-Mooch/blob/main/sample.csv)** as a starting point. Before using it in Auto Mooch, review the group URLs and replace the post text with your own messages.
+
 ## 1. Scan Facebook groups
 
 ![Facebook Group Scanner showing collected group names and URLs](assets/screenshots/facebook-group-scanner.png)

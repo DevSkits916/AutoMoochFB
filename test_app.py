@@ -155,7 +155,7 @@ class Checks(unittest.TestCase):
         root.withdraw()
         try:
             app = App(root)
-            app.jobs = load_csv(Path(__file__).parent / 'sample CSV.csv')[:5]
+            app.jobs = load_csv(Path(__file__).parent / 'sample.csv')[:5]
             app.history = {}
             for index, state in enumerate(['Complete', 'Queued', 'Running', 'Skipped: user requested', 'Queued']):
                 app.table.insert('', 'end', iid=str(index), values=(str(index), state))
