@@ -12,6 +12,124 @@ from facebook import answer_membership_form, membership_answer, enter_post_text,
 
 
 class Checks(unittest.TestCase):
+    def setUp(self):
+        # Restoring a user's last CSV must not populate test queues or read their results.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        data_patch = patch('app.DATA', Path(folder.name))
+        data_patch.start()
+        self.addCleanup(data_patch.stop)
+
+    def test_posting_cooldown_counts_down_and_resumes_remaining(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                app.jobs = [{'id': str(i)} for i in range(4)]
+                app.history = {'0': 'Complete', '1': 'Review: POSTING_RESTRICTED', '3': 'Review: uncertain submission'}
+                app.pending = [2, 3]
+                app.thread = Mock()
+                app.thread.is_alive.return_value = True
+                app.events.put(('alert', 'Posting restricted'))
+                with patch('app.time.monotonic', return_value=100), patch.object(app, 'alert_posting_restriction'):
+                    app.poll()
+                self.assertEqual(app.cooldown_deadline, 10900)
+                self.assertIn('03:00:00', app.cooldown_text.get())
+                self.assertTrue(app.cooldown_label.winfo_manager())
+                with patch('app.time.monotonic', return_value=3700):
+                    app.update_posting_cooldown()
+                self.assertIn('02:00:00', app.cooldown_text.get())
+                with patch('app.time.monotonic', return_value=10900), patch.object(app, 'launch') as launch:
+                    app.update_posting_cooldown()
+                    launch.assert_not_called()
+                    app.thread.is_alive.return_value = False
+                    app.update_posting_cooldown()
+                    launch.assert_called_once_with(False, resume_indices=[2])
+                    app.update_posting_cooldown()
+                    launch.assert_called_once()
+                self.assertIsNone(app.cooldown_deadline)
+            finally:
+                root.destroy()
+
+    def test_stop_cancels_posting_cooldown_and_delayed_alert(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                app.start_posting_cooldown()
+                app.request_stop()
+                self.assertIsNone(app.cooldown_deadline)
+                self.assertFalse(app.cooldown_label.winfo_manager())
+                with patch.object(app, 'launch') as launch:
+                    app.start_posting_cooldown()
+                    app.update_posting_cooldown()
+                    launch.assert_not_called()
+                self.assertIsNone(app.cooldown_deadline)
+                self.assertIn('cancelled', app.status.get())
+            finally:
+                root.destroy()
+
+    def test_cooldown_without_remaining_groups_does_not_restart(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                with patch('app.time.monotonic', return_value=10):
+                    app.start_posting_cooldown()
+                with patch('app.time.monotonic', return_value=10810), patch.object(app, 'launch') as launch:
+                    app.update_posting_cooldown()
+                    launch.assert_not_called()
+                self.assertIn('no remaining groups', app.status.get())
+            finally:
+                root.destroy()
+
+    def test_last_csv_restored_after_reopen(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
+            path = Path(folder) / 'original.csv'
+            path.write_text('Group Name,URL,post,Extra\nDogs,https://www.facebook.com/groups/123,"Hello\nLoki",Keep\n', encoding='utf-8-sig')
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                with patch('app.filedialog.askopenfilename', return_value=str(path)):
+                    app.import_csv()
+                originals = app.jobs
+                app.save(app.jobs[0]['id'], 'Complete')
+                path.write_text('URL,post\ninvalid,Test\n', encoding='utf-8')
+                with patch('app.filedialog.askopenfilename', return_value=str(path)), patch('app.messagebox.showerror'):
+                    app.import_csv()
+                self.assertEqual(app.jobs, originals)
+                path.unlink()
+            finally:
+                root.destroy()
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                reopened = App(root)
+                self.assertEqual(reopened.jobs, originals)
+                self.assertEqual(reopened.table.set('0', 'state'), 'Complete')
+                self.assertEqual(reopened.progress_percentage.get(), '100%')
+                self.assertIsNone(reopened.thread)
+            finally:
+                root.destroy()
+
+    def test_corrupt_last_csv_does_not_block_startup(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
+            saved = Path(folder) / 'last-import.csv'
+            saved.write_text('Invalid CSV', encoding='utf-8')
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = App(root)
+                self.assertEqual(app.jobs, [])
+                self.assertIn('Could not restore', app.status.get())
+                self.assertEqual(saved.read_text('utf-8'), 'Invalid CSV')
+            finally:
+                root.destroy()
+
     def test_csv(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'input.csv'
@@ -25,10 +143,12 @@ class Checks(unittest.TestCase):
     def test_gui(self):
         root = tk.Tk()
         root.withdraw()
-        app = App(root)
-        root.update()
-        self.assertIn('Complete 0', app.counts.get())
-        root.destroy()
+        try:
+            app = App(root)
+            root.update()
+            self.assertIn('Complete 0', app.counts.get())
+        finally:
+            root.destroy()
 
     def test_export_remaining_roundtrip(self):
         root = tk.Tk()

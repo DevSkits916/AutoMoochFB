@@ -3,6 +3,7 @@ import asyncio
 import csv
 import hashlib
 import json
+import math
 import os
 import queue
 import random
@@ -22,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 DATA = (Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'AutoMooch') if getattr(sys, 'frozen', False) else ROOT / 'data'
 DATA.mkdir(exist_ok=True)
 PROFILE = DATA / 'profile'
+POSTING_COOLDOWN_SECONDS = 3 * 60 * 60
 
 
 def browser_options():
@@ -78,6 +80,9 @@ class App:
         self.worker_loop = None
         self.skip_requested = False
         self.halt_reason = None
+        self.cooldown_deadline = None
+        self.cooldown_pending = []
+        self.restart_allowed = True
         self.history_path = DATA / 'progress.json'
         self.history = json.loads(self.history_path.read_text('utf-8')) if self.history_path.exists() else {}
         self.headless = tk.BooleanVar()
@@ -103,6 +108,10 @@ class App:
         style.map('Primary.TButton', background=[('active', '#1254a8'), ('disabled', '#aab8ca')])
         style.configure('Treeview', rowheight=30, background='white', fieldbackground='white')
         style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'), padding=8)
+        style.configure('Queue.Horizontal.TProgressbar', background='#60b6ee', troughcolor='#dce7f3')
+        style.configure('ProgressText.TLabel', background='#dce7f3', foreground='#17202b', font=('Segoe UI', 10, 'bold'), padding=(4, 0))
+        self.cooldown_text = tk.StringVar()
+        self.cooldown_label = ttk.Label(root, textvariable=self.cooldown_text, style='HUD.TLabel', padding=12, wraplength=850)
         self.panes = ttk.Panedwindow(root, orient='horizontal')
         self.panes.pack(fill='both', expand=True)
         frame = ttk.Frame(self.panes, padding=16, width=760)
@@ -130,8 +139,13 @@ class App:
             card = ttk.LabelFrame(stats, text=label, padding=8)
             card.grid(row=0, column=column, sticky='ew', padx=(0, 5))
             ttk.Label(card, textvariable=value, style='HUD.TLabel').pack(anchor='w')
-        self.progress = ttk.Progressbar(frame)
-        self.progress.grid(row=3, column=0, sticky='ew', pady=(0, 12))
+        progress_frame = ttk.Frame(frame)
+        progress_frame.grid(row=3, column=0, sticky='ew', pady=(0, 12))
+        self.progress = ttk.Progressbar(progress_frame, style='Queue.Horizontal.TProgressbar', length=200)
+        self.progress.pack(fill='x', ipady=4)
+        self.progress_percentage = tk.StringVar(value='0%')
+        self.progress_label = ttk.Label(progress_frame, textvariable=self.progress_percentage, style='ProgressText.TLabel')
+        self.progress_label.place(relx=0.5, rely=0.5, anchor='center')
         controls = ttk.Frame(frame)
         controls.grid(row=4, column=0, sticky='ew', pady=(0, 12))
         for column in range(3):
@@ -167,7 +181,7 @@ class App:
         self.settings_window.withdraw()
         self.settings_window.title('Auto Mooch • Worker settings')
         self.settings_window.transient(root)
-        self.settings_window.minsize(410, 260)
+        self.settings_window.minsize(410, 330)
         self.settings_window.resizable(True, True)
         self.settings_window.protocol('WM_DELETE_WINDOW', self.settings_window.withdraw)
         opts = ttk.LabelFrame(self.settings_window, text='Worker settings', padding=16)
@@ -181,18 +195,29 @@ class App:
         ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=2, column=0, sticky='w', pady=(6, 0))
         ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=3, column=0, columnspan=2, sticky='w', pady=(4, 0))
         ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=4, column=0, columnspan=2, sticky='w', pady=(14, 8))
-        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=5, column=0, columnspan=2, sticky='e')
+        ttk.Button(opts, text='Open data folder', command=self.open_data_folder).grid(row=5, column=0, columnspan=2, sticky='ew', pady=(0, 4))
+        ttk.Label(opts, text='Saved answers, logs, and failure screenshots.', wraplength=360).grid(row=6, column=0, columnspan=2, sticky='w', pady=(0, 12))
+        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=7, column=0, columnspan=2, sticky='e')
         self.console_window = None
         self.console_frame = None
         self.create_console(self.panes)
         self.panes.add(self.console_frame, weight=2)
         root.protocol('WM_DELETE_WINDOW', self.close)
+        self.restore_last_csv()
         root.after(100, self.poll)
 
     def toggle_settings(self):
         self.settings_window.deiconify()
         self.settings_window.lift()
         self.settings_window.focus_set()
+
+    def open_data_folder(self):
+        try:
+            DATA.mkdir(parents=True, exist_ok=True)
+            os.startfile(str(DATA.resolve()))
+        except OSError as error:
+            self.log(f'Could not open data folder: {error}')
+            messagebox.showerror('Open data folder', f'Could not open {DATA}:\n{error}', parent=self.settings_window)
 
     def log(self, text):
         self.events.put(('log', str(text)))
@@ -253,9 +278,57 @@ class App:
             self.console_window.lift()
         self.console.focus_set()
 
+    def start_posting_cooldown(self):
+        if not self.restart_allowed:
+            return
+        with self.queue_lock:
+            self.cooldown_pending = list(self.pending)
+        self.cooldown_deadline = time.monotonic() + POSTING_COOLDOWN_SECONDS
+        self.cooldown_label.pack(side='top', fill='x', before=self.panes)
+        for button in self.buttons:
+            button.configure(state='disabled')
+        self.log('Posting restricted. Automatic restart scheduled in 3 hours; press Stop to cancel. The restricted post remains marked for review.')
+        self.update_posting_cooldown()
+
+    def cancel_posting_cooldown(self, log_cancel=True):
+        scheduled = self.cooldown_deadline is not None
+        self.cooldown_deadline = None
+        self.cooldown_pending = []
+        self.cooldown_text.set('')
+        self.cooldown_label.pack_forget()
+        if scheduled:
+            if log_cancel:
+                self.log('Automatic restart cancelled.')
+            if not self.thread or not self.thread.is_alive():
+                for button in self.buttons:
+                    button.configure(state='normal')
+        return scheduled
+
+    def update_posting_cooldown(self):
+        if self.cooldown_deadline is None:
+            return
+        seconds = max(0, math.ceil(self.cooldown_deadline - time.monotonic()))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.cooldown_text.set(f'Posting restricted • Automatic restart in {hours:02d}:{minutes:02d}:{seconds:02d} • Stop cancels restart')
+        if hours or minutes or seconds or (self.thread and self.thread.is_alive()):
+            return
+        indices = [i for i in self.cooldown_pending
+                   if not self.history.get(self.jobs[i]['id'], '').startswith(('Complete', 'Review'))]
+        self.cancel_posting_cooldown(log_cancel=False)
+        if indices:
+            self.log('Three-hour wait finished. Restarting the worker with the remaining queued groups.')
+            self.launch(False, resume_indices=indices)
+        else:
+            self.halt_reason = None
+            self.status.set('Cooldown finished • no remaining groups to restart')
+
     def shuffle_pending(self):
         with self.queue_lock:
-            if self.thread and self.thread.is_alive():
+            if self.cooldown_deadline is not None:
+                random.shuffle(self.cooldown_pending)
+                order = list(self.cooldown_pending)
+            elif self.thread and self.thread.is_alive():
                 random.shuffle(self.pending)
                 order = list(self.pending)
             else:
@@ -317,11 +390,37 @@ class App:
         except Exception as error:
             messagebox.showerror('Import failed', str(error))
             return
+        self.show_jobs(jobs, f'Loaded {len(jobs)} groups • {Path(path).name}')
+        try:
+            saved = DATA / 'last-import.csv'
+            temp = saved.with_suffix('.tmp')
+            with temp.open('w', encoding='utf-8-sig', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=jobs[0]['source_headers'])
+                writer.writeheader()
+                writer.writerows(job['source_row'] for job in jobs)
+            temp.replace(saved)
+        except (OSError, ValueError, csv.Error) as error:
+            self.log(f'CSV loaded, but could not remember it for next time: {error}')
+            messagebox.showwarning('Remember CSV', f'The CSV is loaded for this session, but could not be saved for reopening:\n{error}')
+
+    def restore_last_csv(self):
+        saved = DATA / 'last-import.csv'
+        if not saved.exists():
+            return
+        try:
+            jobs = load_csv(saved)
+        except (OSError, ValueError, csv.Error) as error:
+            self.status.set('Could not restore last CSV • import a CSV to continue')
+            self.log(f'Could not restore last CSV: {error}')
+            return
+        self.show_jobs(jobs, f'Restored {len(jobs)} groups • last imported CSV')
+
+    def show_jobs(self, jobs, status):
         self.jobs = jobs
         self.table.delete(*self.table.get_children())
         for index, job in enumerate(jobs):
             self.table.insert('', 'end', iid=str(index), values=(job['name'], self.history.get(job['id'], 'Queued')))
-        self.status.set(f'Loaded {len(jobs)} groups • {Path(path).name}')
+        self.status.set(status)
         self.update_counts()
 
     def update_counts(self):
@@ -334,9 +433,13 @@ class App:
         for value, number in zip(self.stat_values, (complete, failed, skipped, len(states)-done)):
             value.set(str(number))
         self.progress.configure(maximum=max(1, len(states)), value=done)
+        percentage = done * 100 / len(states) if states else 0
+        self.progress_percentage.set(f'{percentage:.0f}%' if percentage in (0, 100) else f'{percentage:.1f}%')
 
-    def launch(self, login):
+    def launch(self, login, resume_indices=None):
         if self.thread and self.thread.is_alive():
+            return
+        if self.cooldown_deadline is not None:
             return
         if not login and not self.jobs:
             messagebox.showinfo('Import CSV', 'Import a CSV before starting.')
@@ -362,6 +465,7 @@ class App:
             messagebox.showerror('Settings', str(error))
             return
         self.stop.clear()
+        self.restart_allowed = True
         self.halt_reason = None
         for button in self.buttons:
             button.configure(state='disabled')
@@ -370,7 +474,7 @@ class App:
         headless = False if login else self.headless.get()
         join_groups = self.join_groups.get()
         with self.queue_lock:
-            self.pending = [int(i) for i in self.table.get_children()]
+            self.pending = list(resume_indices) if resume_indices is not None else [int(i) for i in self.table.get_children()]
         self.thread = threading.Thread(target=lambda: asyncio.run(self.run(login, headless, delay, answers, composer_seconds, join_groups)), daemon=True)
         self.thread.start()
 
@@ -470,7 +574,7 @@ class App:
                             except Exception:
                                 pass
                         if security:
-                            self.log('Worker stopped: resolve Facebook restrictions or verification before restarting.')
+                            self.log('Worker stopped: Facebook restriction or verification detected.')
                             break
                         if state.startswith(('Skipped: user', 'Review: skipped')):
                             continue
@@ -487,8 +591,12 @@ class App:
             self.events.put(('done',))
 
     def request_stop(self):
+        self.restart_allowed = False
+        cancelled = self.cancel_posting_cooldown()
         self.stop.set()
-        self.status.set('Stopping after current group…')
+        if cancelled:
+            self.halt_reason = 'Stopped • automatic restart cancelled'
+        self.status.set(self.halt_reason if cancelled else 'Stopping after current group…')
 
     def poll(self):
         for _ in range(100):
@@ -512,6 +620,7 @@ class App:
                 self.skip_button.configure(state='normal' if event[1] else 'disabled')
             elif event[0] == 'alert':
                 self.alert_posting_restriction(event[1])
+                self.start_posting_cooldown()
             elif event[0] == 'bell':
                 self.root.bell()
             elif event[0] == 'result':
@@ -521,10 +630,13 @@ class App:
                 self.status.set(self.halt_reason or ('Stopped' if self.stop.is_set() else 'Worker finished • review results'))
                 self.task.set('No current task')
                 for button in self.buttons:
-                    button.configure(state='normal')
+                    button.configure(state='disabled' if self.cooldown_deadline is not None else 'normal')
+        self.update_posting_cooldown()
         self.root.after(100, self.poll)
 
     def close(self):
+        self.restart_allowed = False
+        self.cancel_posting_cooldown()
         if self.thread and self.thread.is_alive():
             self.request_stop()
             self.root.after(250, self.close)

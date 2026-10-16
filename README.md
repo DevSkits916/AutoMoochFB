@@ -84,10 +84,12 @@ Auto Mooch uses the post text in the imported file; it does not generate posts w
 
 1. Click **Import CSV** and select your prepared file or edited sample.
 2. Check the loaded groups and click **Show worker settings** to open a separate, resizable settings window. Choose your settings, then close that window when finished; your choices are retained for the session.
-3. Click **Start Worker**. Follow the current task, progress counts, and console logs.
+3. Click **Start Worker**. Follow the current task, progress counts, and console logs. The percentage inside the progress bar shows the share of groups processed, including completed, failed, review, and skipped results.
 4. Click **Stop** to finish the current group and stop the queue, or **Skip Current Group** to cancel the current task and continue.
 
 CSV files require `URL` and `post` columns, matched case insensitively. `Group Name` is used for display when available. Original columns are retained for export, and quoted multiline posts are supported. Every URL must be an HTTPS Facebook group URL, and every post must be nonempty.
+
+Auto Mooch remembers each successfully imported CSV in a private `last-import.csv` copy in its data folder and automatically loads it on reopening, even if the original file has been moved or deleted. Saved results and progress counts are restored; the worker only starts when you click **Start Worker**. Import another CSV to replace the remembered file. Changes to the original CSV require importing it again. If the saved copy cannot be read, the app opens normally and asks you to import a CSV.
 
 ## Worker controls
 
@@ -109,13 +111,15 @@ If membership checking times out, the worker still looks for the composer and at
 
 ## Posting limits and saved results
 <img width="566" height="342" alt="Screenshot 2026-10-14 190556" src="https://github.com/user-attachments/assets/551640fe-eee2-4d91-85b5-1b0eb6b1f82b" />
-If Facebook displays **“We limit how often you can post…”** in the composer after submission, Auto Mooch stops before opening another group, sounds a repeating Windows beep, and shows a posting-limit status. The current post requires review; remaining groups stay queued. Resolve the restriction before restarting.
+If Facebook displays **“We limit how often you can post…”** in the composer after submission, Auto Mooch stops before opening another group, sounds a repeating Windows beep, and shows a **three-hour countdown at the top of the main window**. After the countdown expires and the old browser has closed, it automatically starts the worker for the remaining queued groups. The restricted submission stays marked for review and is not automatically retried. If another posting-limit message appears, the worker stops and starts a new three-hour countdown.
+
+Press **Stop** to cancel the scheduled restart. Keep Auto Mooch open for the countdown to continue; closing the app cancels the timer. Import, login, and start buttons stay disabled during the countdown; use Stop to cancel it before using those controls. The timer is a waiting period and does not guarantee Facebook has lifted the restriction. Login, CAPTCHA, and other verification stops do not schedule an automatic restart.
 
 Login, CAPTCHA, identity checks, administrator approval, and unknown membership questions may require attention. English Facebook controls are supported; changes to Facebook's interface may require updates.
 
 **Complete** means the composer closed after submission. It does not guarantee public visibility or administrator approval. Completed and uncertain submissions are not automatically retried, including duplicate URL/post combinations. Skipped and failed groups may be retried on a later run. Stop and app closing wait for the current group's bounded operation to finish.
 
-The EXE stores login data, progress, logs, and failure screenshots in `%LOCALAPPDATA%\AutoMooch`. Source installations use the `data` folder instead. Keep those files private, avoid running multiple instances against the same profile, and check Facebook before changing saved progress to repeat a post.
+The EXE stores login data, progress, logs, and failure screenshots in `%LOCALAPPDATA%\AutoMooch`. Source installations use the `data` folder instead. Click **Show worker settings → Open data folder** to open the folder containing `answers.txt`, `worker.log`, and failure screenshots in File Explorer. Keep those files private, avoid running multiple instances against the same profile, and check Facebook before changing saved progress to repeat a post.
 
 
 
