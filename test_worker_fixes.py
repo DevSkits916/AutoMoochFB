@@ -17,7 +17,7 @@ class FixChecks(unittest.TestCase):
         data_patch.start()
         self.addCleanup(data_patch.stop)
 
-    def test_membership_problems_still_post_when_composer_is_available(self):
+    def test_membership_blocks_skip_without_composer_fallback(self):
         async def check():
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(headless=True)
@@ -35,9 +35,18 @@ class FixChecks(unittest.TestCase):
                             html = prefix + composer
                             await page.route('https://www.facebook.com/groups/123', lambda route: route.fulfill(body=html, content_type='text/html'))
                             steps = []
-                            result = await post_to_facebook(page, {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Exact queued text'}, steps.append, join_before_post=join, composer_timeout_ms=1500)
-                            self.assertEqual(result['status'], 'posted')
-                            self.assertEqual(await page.evaluate('window.posted'), 'Exact queued text')
+                            job = {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Exact queued text'}
+                            blocked = join or prefix == cases[0] or prefix == cases[2]
+                            if blocked:
+                                with self.assertRaises(AutomationError) as raised:
+                                    await post_to_facebook(page, job, steps.append, join_before_post=join, composer_timeout_ms=1500)
+                                self.assertIn(raised.exception.code, {'JOIN_PENDING', 'GROUP_UNAVAILABLE'})
+                                self.assertFalse(any('Finding composer' in step for step in steps))
+                                self.assertFalse(await page.evaluate('Boolean(window.posted)'))
+                            else:
+                                result = await post_to_facebook(page, job, steps.append, join_before_post=join, composer_timeout_ms=1500)
+                                self.assertEqual(result['status'], 'posted')
+                                self.assertEqual(await page.evaluate('window.posted'), 'Exact queued text')
                             self.assertFalse(await page.evaluate('Boolean(window.membershipSubmitted)'))
                             await page.unroute('https://www.facebook.com/groups/123')
                     opened = '''<div role="dialog"><h2>Create post</h2><div role="textbox" contenteditable="true"></div><button onclick="window.posted=document.querySelector('[contenteditable]').innerText; this.parentElement.remove()">Post</button></div>'''
@@ -60,7 +69,7 @@ class FixChecks(unittest.TestCase):
                     for join in (False, True):
                         with self.assertRaises(AutomationError) as raised:
                             await post_to_facebook(page, {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Test'}, join_before_post=join, composer_timeout_ms=500)
-                        self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                        self.assertEqual(raised.exception.code, 'JOIN_PENDING')
                         self.assertFalse(await page.evaluate('Boolean(window.wrongGroup)'))
                     await page.set_content('<article><p>Your membership is pending</p><button>Cancel request</button></article>')
                     self.assertFalse(await membership_is_pending(page))
@@ -80,12 +89,12 @@ class FixChecks(unittest.TestCase):
                     job = {'groupUrl': 'https://www.facebook.com/groups/123', 'postText': 'Test'}
                     with self.assertRaises(AutomationError) as raised:
                         await post_to_facebook(page, job, steps.append, join_before_post=True, membership_answers=[{'question': 'where do you live', 'answer': 'Sacramento'}], composer_timeout_ms=1000)
-                    self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                    self.assertEqual(raised.exception.code, 'JOIN_PENDING')
                     self.assertEqual(await page.evaluate('window.answer'), 'Sacramento')
                     self.assertFalse(await page.evaluate('Boolean(window.wrongGroup)'))
                     with self.assertRaises(AutomationError) as raised:
                         await post_to_facebook(page, job, steps.append, join_before_post=True, membership_answers=[], composer_timeout_ms=1000)
-                    self.assertEqual(raised.exception.code, 'COMPOSER_NOT_FOUND')
+                    self.assertEqual(raised.exception.code, 'JOIN_PENDING')
                     self.assertIsNone(await page.evaluate('window.answer'))
                     self.assertTrue(any('No saved answer' in step for step in steps))
                 finally:
@@ -127,13 +136,13 @@ class FixChecks(unittest.TestCase):
                 browser = await pw.chromium.launch(headless=True)
                 try:
                     page = await browser.new_page()
-                    for text in ["This group doesn't allow Pages to join.", "Pages can't post in this group.", "Switch to your main profile to post in this group."]:
+                    for text in ["This group doesn't allow Pages to join.", "Pages can't post in this group.", "Switch to your main profile to post in this group.", "This group is closed.", "This group has been archived.", "Only profiles can join this group.", "This group is not accepting new members."]:
                         await page.set_content('<div id="notice"></div>')
                         await page.locator('#notice').evaluate('(e, value) => e.textContent=value', text)
                         with self.assertRaises(AutomationError) as raised:
                             await check_group_availability(page)
                         self.assertEqual(raised.exception.code, 'GROUP_UNAVAILABLE')
-                    await page.set_content('<article>This group is paused</article>')
+                    await page.set_content('<h1>Private group</h1><article>This group is paused</article><article>This group is closed.</article>')
                     await check_group_availability(page)
                 finally:
                     await browser.close()

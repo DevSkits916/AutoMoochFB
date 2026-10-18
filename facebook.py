@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import asyncio
 from collections.abc import Callable
-from playwright.async_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 
 class AutomationError(RuntimeError):
@@ -18,37 +18,18 @@ CAPTCHA = re.compile(r"captcha|enter the characters you see", re.I)
 POST_LIMIT = re.compile(r"we limit how often you can (?:post|comment)|you (?:can['’]t|cannot) (?:try again|post) (?:again )?(?:later|right now|at the moment)|temporarily blocked from (?:posting|using this feature)", re.I)
 
 
-async def check_group_availability(page, *, posting_only=False):
+async def check_group_availability(page):
     notices = page.get_by_text(re.compile(
-        r"^(?:This group is paused|This group doesn['’]t allow Pages to (?:join|post|participate)|"
+        r"^(?:This group is (?:paused|archived|closed|no longer available)|This group has been (?:paused|archived|closed)|This group doesn['’]t allow Pages to (?:join|post|participate)|"
         r"Pages (?:can['’]t|cannot) (?:join|post in|participate in) this group|"
         r"You (?:can['’]t|cannot) post in this group as a Page|"
-        r"Switch to your main profile to (?:join|post in) this group)\.?$", re.I)).filter(visible=True)
+        r"Switch to your main profile to (?:join|post in) this group|Only (?:profiles|personal profiles) can join this group|"
+        r"This group (?:isn['’]t|is not) accepting (?:new members|new posts|posts))\.?$", re.I)).filter(visible=True)
     for index in range(await notices.count()):
         notice = notices.nth(index)
         if not await notice.evaluate("e => !!e.closest('article,[role=article]')"):
             text = await notice.inner_text()
-            if posting_only and re.search(r'\bjoin\b', text, re.I) and not re.search(r'\bpost\b|\bparticipate\b', text, re.I):
-                continue
             raise AutomationError('GROUP_UNAVAILABLE', text)
-
-
-async def dismiss_membership_dialog(page, on_step):
-    for dialog in await page.get_by_role('dialog').filter(visible=True).all():
-        if await dialog.get_by_text(re.compile(r'^create (?:a )?post$', re.I)).count():
-            continue
-        on_step('Closing membership dialog to check for the post composer...')
-        close = dialog.get_by_role('button', name=re.compile(r'^close(?: dialog)?$', re.I)).filter(visible=True).first
-        try:
-            if await close.is_visible():
-                await close.click(timeout=3000)
-            else:
-                await page.keyboard.press('Escape')
-            await dialog.wait_for(state='hidden', timeout=2000)
-        except PlaywrightError:
-            if page.is_closed():
-                raise
-            on_step('Membership dialog remains open; checking whether a composer is available...')
 
 
 async def membership_is_pending(page):
@@ -301,7 +282,7 @@ async def join_group(page, on_step, answers, accept_rules, timeout_ms=15000):
         async with asyncio.timeout(timeout_ms / 1000):
             await _join_group(page, on_step, answers, accept_rules, timeout_ms)
     except TimeoutError as error:
-        raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "Membership check timed out; attempting to find the post composer.") from error
+        raise AutomationError("MEMBERSHIP_CHECK_TIMEOUT", "Membership check timed out; skipping this group without another composer wait.") from error
 
 
 async def _join_group(page, on_step, answers, accept_rules, timeout_ms):
@@ -347,7 +328,6 @@ async def post_to_facebook(page, job: dict, on_step: Callable[[str], None] = lam
     try:
         on_step("Opening Facebook group...")
         await page.goto(job["groupUrl"], wait_until="domcontentloaded", timeout=45000)
-        body = await page.locator("body").inner_text(timeout=10000)
         checkpoint_url = re.search(r'/(?:checkpoint|confirmidentity|confirm_identity)(?:/|\?|$)', page.url, re.I)
         checkpoint_heading = page.get_by_role('heading', name=re.compile(r'^(?:confirm your identity|security check|account temporarily locked)$', re.I)).filter(visible=True).first
         if checkpoint_url or await checkpoint_heading.is_visible():
@@ -363,31 +343,19 @@ async def post_to_facebook(page, job: dict, on_step: Callable[[str], None] = lam
         group_controls = page.get_by_role('button', name=re.compile(r'^(?:joined|join group|member)$', re.I)).filter(visible=True).first
         if await unavailable.is_visible() and not await group_controls.is_visible():
             raise AutomationError("GROUP_NOT_FOUND", "The group is unavailable or inaccessible.")
-        await check_group_availability(page, posting_only=True)
+        await check_group_availability(page)
         if join_before_post:
-            try:
-                await join_group(page, on_step, membership_answers or [], accept_group_rules, composer_timeout_ms)
-            except AutomationError as error:
-                if error.security:
-                    raise
-                if error.code == 'MEMBERSHIP_CHECK_TIMEOUT':
-                    on_step("Membership check timed out; trying to post to this group before continuing...")
-                else:
-                    on_step(f'Membership step: {error}. Checking for a post composer anyway...')
-                await dismiss_membership_dialog(page, on_step)
-            except PlaywrightError as error:
-                if page.is_closed():
-                    raise
-                on_step(f'Membership browser error: {error}. Checking for a post composer anyway...')
-                await dismiss_membership_dialog(page, on_step)
+            await join_group(page, on_step, membership_answers or [], accept_group_rules, composer_timeout_ms)
+        else:
+            await handle_pending_membership(page, on_step)
         editor = await prepare_composer(page, on_step, composer_timeout_ms, answers=membership_answers, accept_rules=accept_group_rules)
-        await check_group_availability(page, posting_only=True)
+        await check_group_availability(page)
         dialog = page.get_by_role("dialog")
         on_step("Entering post text...")
         await enter_post_text(page, editor, job["postText"])
         post_button = await first_enabled(page, [dialog.get_by_role("button", name=re.compile(r"^(post|publish)$", re.I))])
         if not post_button:
-            await check_group_availability(page, posting_only=True)
+            await check_group_availability(page)
             raise AutomationError("POST_BUTTON_NOT_FOUND", "Post button was not enabled after entering the text.")
         on_step("Submitting post...")
         await post_button.click(timeout=10000)

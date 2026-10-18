@@ -101,6 +101,8 @@ async def scan_query(page, query, limit, seconds, stop, on_results, log):
         batch = []
         for item in parse_links(links):
             key = item['url'].casefold()
+            if stop.is_set() or time.monotonic() >= deadline:
+                break
             if key not in seen and len(seen) < limit:
                 seen.add(key)
                 batch.append(item)
@@ -130,10 +132,11 @@ class Scanner:
         self.stop = threading.Event()
         self.thread = None
         self.results = {}
+        self.total_text = tk.StringVar(value='Total groups collected: 0')
         self.status = tk.StringVar(value='Ready • enter search terms, one per line')
         self.headless = tk.BooleanVar()
         self.limit = tk.StringVar(value='100')
-        self.seconds = tk.StringVar(value='90')
+        self.seconds = tk.StringVar(value='30')
         root.title('Auto Mooch • Facebook Group Scanner')
         self.window_icon = tk.PhotoImage(file=str(ROOT / 'assets' / 'header.png'))
         root.iconphoto(True, self.window_icon)
@@ -151,16 +154,21 @@ class Scanner:
         ttk.Label(frame, textvariable=self.status).grid(row=1, column=0, sticky='w', pady=8)
         controls = ttk.Frame(frame)
         controls.grid(row=2, column=0, sticky='ew', pady=(0, 10))
+        action_controls = ttk.Frame(controls)
+        action_controls.pack(fill='x', pady=(0, 6))
         self.buttons = []
         for label, command in [('Open Login', lambda: self.launch(True)), ('Start Scan', lambda: self.launch(False))]:
-            button = ttk.Button(controls, text=label, command=command)
+            button = ttk.Button(action_controls, text=label, command=command)
             button.pack(side='left', padx=(0, 8))
             self.buttons.append(button)
-        ttk.Button(controls, text='Stop', command=self.stop.set).pack(side='left', padx=4)
-        ttk.Button(controls, text='Export CSV', command=self.export).pack(side='left', padx=4)
-        self.clear_button = ttk.Button(controls, text='Clear Results', command=self.clear)
+        ttk.Button(action_controls, text='Stop', command=self.stop.set).pack(side='left', padx=4)
+        ttk.Button(action_controls, text='Export CSV', command=self.export).pack(side='left', padx=4)
+        self.clear_button = ttk.Button(action_controls, text='Clear Results', command=self.clear)
         self.clear_button.pack(side='left', padx=4)
-        ttk.Checkbutton(controls, text='Headless', variable=self.headless).pack(side='right')
+        headless_options = ttk.Frame(controls)
+        headless_options.pack(fill='x')
+        ttk.Checkbutton(headless_options, text='Headless', variable=self.headless).pack(side='left')
+        ttk.Label(headless_options, text='Warning: Log in and test the workflow before activating headless mode.', foreground='#c62828', wraplength=600, justify='left').pack(side='left', padx=(8, 0))
         panes = ttk.Panedwindow(frame, orient='horizontal')
         panes.grid(row=3, column=0, sticky='nsew')
         left = ttk.Frame(panes, padding=8)
@@ -176,13 +184,16 @@ class Scanner:
         ttk.Entry(options, textvariable=self.limit, width=6).grid(row=0, column=1)
         ttk.Label(options, text='Seconds per search').grid(row=1, column=0, sticky='w')
         ttk.Entry(options, textvariable=self.seconds, width=6).grid(row=1, column=1)
-        self.table = ttk.Treeview(right, columns=('name', 'url'), show='headings', height=5)
+        ttk.Label(right, textvariable=self.total_text, font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 8))
+        results_frame = ttk.Frame(right)
+        results_frame.pack(fill='both', expand=True)
+        self.table = ttk.Treeview(results_frame, columns=('name', 'url'), show='headings', height=5)
         self.table.heading('name', text='Group Name')
         self.table.heading('url', text='URL')
         self.table.column('name', width=180, minwidth=100)
         self.table.column('url', width=380, minwidth=200)
         self.table.pack(side='left', fill='both', expand=True)
-        scrollbar = ttk.Scrollbar(right, command=self.table.yview)
+        scrollbar = ttk.Scrollbar(results_frame, command=self.table.yview)
         scrollbar.pack(side='right', fill='y')
         self.table.configure(yscrollcommand=scrollbar.set)
         ttk.Label(frame, text='Exports Group Name and URL only. Add a post column afterward for Auto Mooch.').grid(row=4, column=0, sticky='w', pady=10)
@@ -204,6 +215,7 @@ class Scanner:
                 row = dict(row, name=clean_group_name(row['name'], row['url']))
                 self.results[key] = row
                 self.table.insert('', 'end', values=(row['name'], row['url']))
+        self.total_text.set(f'Total groups collected: {len(self.results):,}')
 
     def persist(self):
         temp = DATA / 'groups.tmp'
@@ -214,6 +226,7 @@ class Scanner:
         if self.thread and self.thread.is_alive():
             return
         self.results.clear()
+        self.total_text.set('Total groups collected: 0')
         self.table.delete(*self.table.get_children())
         self.persist()
         self.status.set('Results cleared')

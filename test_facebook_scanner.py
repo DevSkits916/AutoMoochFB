@@ -59,6 +59,7 @@ class ScannerChecks(unittest.TestCase):
             self.assertFalse(hasattr(scanner, 'post'))
             self.assertFalse(hasattr(scanner, 'title'))
             self.assertEqual(root.resizable(), (1, 1))
+            self.assertEqual(scanner.seconds.get(), '30')
             scanner.add([{'name': 'Profile photo of Previously Saved Group', 'url': 'https://www.facebook.com/groups/scanner-regression-fixture'}])
             self.assertEqual(scanner.results['https://www.facebook.com/groups/scanner-regression-fixture']['name'], 'Previously Saved Group')
             self.assertEqual(scanner.table.item(scanner.table.get_children()[-1], 'values')[0], 'Previously Saved Group')
@@ -70,12 +71,19 @@ class ScannerChecks(unittest.TestCase):
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(headless=True)
                 try:
-                    page = await browser.new_page()
+                    context = await browser.new_context()
+                    page = await context.new_page()
                     html = '<aside><a href="/groups/999/">Sidebar Group</a></aside><main><a href="/groups/123/" aria-label="Profile photo of Dog Owners"><img alt=""></a><a href="/groups/123/">Dog Owners</a><a href="/groups/456/">Community Support</a><a href="/groups/123/posts/555/">Post</a></main>'
-                    await page.route('https://www.facebook.com/search/groups/**', lambda route: route.fulfill(body=html, content_type='text/html'))
+                    await page.context.route('https://www.facebook.com/search/groups/**', lambda route: route.fulfill(body=html, content_type='text/html'))
+                    group_visits = []
+                    async def unexpected_group_visit(route):
+                        group_visits.append(route.request.url)
+                        await route.abort()
+                    await page.context.route('https://www.facebook.com/groups/*', unexpected_group_visit)
                     rows = []
                     count = await scan_query(page, 'dogs', 2, 10, threading.Event(), rows.extend, lambda _: None)
                     self.assertEqual(count, 2)
+                    self.assertEqual(group_visits, [])
                     self.assertEqual(rows[0]['name'], 'Dog Owners')
                     self.assertFalse(any('999' in row['url'] for row in rows))
                 finally:

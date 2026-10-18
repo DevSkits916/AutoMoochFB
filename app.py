@@ -113,7 +113,7 @@ class App:
         style.configure('Queue.Horizontal.TProgressbar', background='#60b6ee', troughcolor='#dce7f3')
         style.configure('ProgressText.TLabel', background='#dce7f3', foreground='#17202b', font=('Segoe UI', 10, 'bold'), padding=(4, 0))
         self.cooldown_text = tk.StringVar()
-        self.cooldown_label = ttk.Label(root, textvariable=self.cooldown_text, style='HUD.TLabel', padding=12, wraplength=850)
+        self.cooldown_label = ttk.Label(root, textvariable=self.cooldown_text, style='HUD.TLabel', foreground='#c62828', padding=12, wraplength=850)
         self.panes = ttk.Panedwindow(root, orient='horizontal')
         self.panes.pack(fill='both', expand=True)
         self.queue_frame = ttk.Frame(self.panes, padding=12, width=460)
@@ -152,9 +152,13 @@ class App:
         for index, (label, value) in enumerate(zip(('Complete', 'Failed', 'Skipped', 'Remaining'), self.stat_values)):
             column = index % 2
             stats.columnconfigure(column, weight=1, uniform='stats')
-            card = ttk.LabelFrame(stats, text=label, padding=8)
+            color = {'Complete': '#16803c', 'Failed': '#c62828'}.get(label)
+            card_style = f'{label}.TLabelframe'
+            if color:
+                style.configure(f'{card_style}.Label', foreground=color)
+            card = ttk.LabelFrame(stats, text=label, padding=8, style=card_style if color else 'TLabelframe')
             card.grid(row=index // 2, column=column, sticky='ew', padx=(0, 5), pady=(0, 5))
-            ttk.Label(card, textvariable=value, style='HUD.TLabel').pack(anchor='w')
+            ttk.Label(card, textvariable=value, style='HUD.TLabel', **({'foreground': color} if color else {})).pack(anchor='w')
         progress_frame = ttk.Frame(frame)
         progress_frame.grid(row=3, column=0, sticky='ew', pady=(0, 12))
         self.progress = ttk.Progressbar(progress_frame, style='Queue.Horizontal.TProgressbar', length=200)
@@ -181,6 +185,8 @@ class App:
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
         self.table = ttk.Treeview(table_frame, columns=('group', 'state'), show='headings', height=4)
+        self.table.tag_configure('complete', foreground='#16803c')
+        self.table.tag_configure('failed', foreground='#c62828')
         self.table.heading('group', text='Group')
         self.table.heading('state', text='Result')
         self.table.column('group', width=320, minwidth=150)
@@ -197,7 +203,7 @@ class App:
         self.settings_window.withdraw()
         self.settings_window.title('Auto Mooch • Worker settings')
         self.settings_window.transient(root)
-        self.settings_window.minsize(410, 410)
+        self.settings_window.minsize(410, 460)
         self.settings_window.resizable(True, True)
         self.settings_window.protocol('WM_DELETE_WINDOW', self.settings_window.withdraw)
         opts = ttk.LabelFrame(self.settings_window, text='Worker settings', padding=16)
@@ -211,11 +217,12 @@ class App:
         ttk.Label(opts, text='Posting restriction wait (minutes)').grid(row=2, column=0, sticky='w', pady=3)
         ttk.Entry(opts, textvariable=self.restart_wait_minutes, width=7).grid(row=2, column=1, sticky='e')
         ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=3, column=0, sticky='w', pady=(6, 0))
-        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=4, column=0, columnspan=2, sticky='w', pady=(4, 0))
-        ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=5, column=0, columnspan=2, sticky='w', pady=(14, 8))
-        ttk.Button(opts, text='Open data folder', command=self.open_data_folder).grid(row=6, column=0, columnspan=2, sticky='ew', pady=(0, 4))
-        ttk.Label(opts, text='Saved answers, logs, and failure screenshots.', wraplength=360).grid(row=7, column=0, columnspan=2, sticky='w', pady=(0, 12))
-        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=8, column=0, columnspan=2, sticky='e')
+        ttk.Label(opts, text='Warning: Log in and test the workflow before activating headless mode.', foreground='#9a4d00', wraplength=340).grid(row=4, column=0, columnspan=2, sticky='w', pady=(4, 8))
+        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=5, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=6, column=0, columnspan=2, sticky='w', pady=(14, 8))
+        ttk.Button(opts, text='Open data folder', command=self.open_data_folder).grid(row=7, column=0, columnspan=2, sticky='ew', pady=(0, 4))
+        ttk.Label(opts, text='Saved answers, logs, and failure screenshots.', wraplength=360).grid(row=8, column=0, columnspan=2, sticky='w', pady=(0, 12))
+        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=9, column=0, columnspan=2, sticky='e')
         self.console_window = None
         self.console_frame = None
         self.create_console(self.panes)
@@ -442,7 +449,12 @@ class App:
         self.update_counts()
 
     def update_counts(self):
-        states = [self.table.set(item, 'state') for item in self.table.get_children()]
+        states = []
+        for item in self.table.get_children():
+            state = self.table.set(item, 'state')
+            states.append(state)
+            tags = ('complete',) if state == 'Complete' else (('failed',) if state.startswith(('Failed', 'Review')) else ())
+            self.table.item(item, tags=tags)
         complete = sum(s == 'Complete' for s in states)
         failed = sum(s.startswith(('Failed', 'Review')) for s in states)
         skipped = sum(s.startswith('Skipped') for s in states)
@@ -580,7 +592,7 @@ class App:
                                 self.halt_reason = 'Stopped • Facebook posting limit detected'
                                 self.stop.set()
                                 self.events.put(('alert', self.halt_reason))
-                            prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND', 'GROUP_UNAVAILABLE'} or security else 'Failed')
+                            prefix = 'Review' if submitted else ('Skipped' if error.code in {'JOIN_PENDING', 'MEMBERSHIP_CHECK_TIMEOUT', 'COMPOSER_NOT_FOUND', 'GROUP_NOT_FOUND', 'GROUP_UNAVAILABLE'} or security else 'Failed')
                             state = f'{prefix}: {error.code}'
                             self.log(str(error))
                         except Exception as error:

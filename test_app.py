@@ -260,7 +260,7 @@ class Checks(unittest.TestCase):
     def test_browser(self):
         asyncio.run(self.browser())
 
-    def test_membership_timeout_still_posts(self):
+    def test_membership_timeout_skips_without_composer_retry(self):
         asyncio.run(self.timeout_post())
 
     def test_posting_limit_stops_worker(self):
@@ -356,15 +356,13 @@ class Checks(unittest.TestCase):
                 async def stalled_check(*args):
                     await asyncio.sleep(60)
                 steps = []
-                with patch('facebook._join_group', side_effect=stalled_check):
-                    result = await post_to_facebook(page, job, steps.append, join_before_post=True, composer_timeout_ms=1000)
-                self.assertEqual(result['status'], 'posted')
-                self.assertEqual(await page.locator('body').get_attribute('data-posted'), job['postText'])
-                self.assertTrue(any('Membership check timed out' in step for step in steps))
-                with patch('facebook.join_group', new=AsyncMock(side_effect=AutomationError('JOIN_PENDING', 'Approval pending'))):
-                    result = await post_to_facebook(page, job, join_before_post=True)
-                self.assertEqual(result['status'], 'posted')
-                self.assertEqual(await page.locator('body').get_attribute('data-posted'), job['postText'])
+                for target, failure in [('facebook._join_group', stalled_check), ('facebook.join_group', AsyncMock(side_effect=AutomationError('JOIN_PENDING', 'Approval pending')))]:
+                    with patch(target, side_effect=failure) if target.endswith('_join_group') else patch(target, new=failure):
+                        with self.assertRaises(AutomationError) as raised:
+                            await post_to_facebook(page, job, steps.append, join_before_post=True, composer_timeout_ms=1000)
+                    self.assertIn(raised.exception.code, {'MEMBERSHIP_CHECK_TIMEOUT', 'JOIN_PENDING'})
+                    self.assertIsNone(await page.locator('body').get_attribute('data-posted'))
+                    self.assertFalse(any('Finding composer' in step for step in steps))
             finally:
                 await browser.close()
 

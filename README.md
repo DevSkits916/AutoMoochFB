@@ -31,9 +31,9 @@ Collect your own groups with **Facebook Group Scanner** and add a `post` column 
 2. If Auto Mooch already has its browser open, press **Stop** there and wait for the browser to close.
 3. Click **Open Login**, sign in to Facebook if needed, then press **Stop** to close the browser and save your session. If you already signed in through Auto Mooch, the scanner reuses that login.
 4. Enter your search terms, **one per line**.
-5. Set **Maximum per search** and **Seconds per search**. Leave **Headless** off to watch the browser, or turn it on after signing in.
-6. Click **Start Scan**. The scanner collects group names and URLs and removes duplicate group URLs across searches.
-7. Click **Stop** to finish early and retain collected results, or wait for scanning to finish.
+5. Set **Maximum per search** and **Seconds per search**. Leave **Headless** off to watch the browser, or turn it on after signing in and testing the workflow.
+6. Click **Start Scan**. The scanner quickly collects group names and URLs directly from search results without opening each group, and removes duplicate group URLs across searches. It does not verify privacy or paused/closed status. **Seconds per search** defaults to **30**.
+7. Watch **Total groups collected** above the results list. It counts unique groups, including restored results, and resets when you click **Clear Results**. Click **Stop** to finish early and retain collected results, or wait for scanning to finish.
 8. Click **Export CSV** and choose where to save your file.
 
 The scanner exports only **`Group Name`** and **`URL`**. It does not add post text. Results are saved automatically and loaded when you reopen the scanner. **Clear Results** starts a fresh collection when the worker is idle.
@@ -109,7 +109,7 @@ Auto Mooch privately remembers the last successfully imported CSV and reloads it
 | **Between groups (seconds)** | Delay between group attempts; default 8 seconds, range 0–3600. |
 | **Composer timeout (seconds)** | Time to look for the post composer; default 15 seconds, range 1–300. |
 | **Posting restriction wait (minutes)** | Wait before automatically restarting after a posting limit; default 180 minutes (3 hours). Accepts whole minutes from 1–10080. Set it before starting the worker; changes do not alter an active countdown. |
-| **Headless browser** | Runs without a visible browser. Use Open Login to sign in first. |
+| **Headless browser** | Runs without a visible browser. Log in and test the workflow before enabling it; a warning appears beside this option. |
 | **Join groups automatically** | Requests membership when needed and accepts recognized rule checkboxes. Turn it off to attempt posting without joining. |
 | **Open data folder** | Opens the folder containing saved answers, logs, and failure screenshots. Find it under Show worker settings. |
 | **Shuffle Pending** | Randomizes waiting groups, including groups waiting during a posting cooldown. |
@@ -117,11 +117,11 @@ Auto Mooch privately remembers the last successfully imported CSV and reloads it
 | **Export Remaining CSV** | Exports waiting groups with their original columns and post text. Excludes the active group and finished results. |
 | **Detach console / Attach console** | Moves the console into a separate resizable window or back into the dashboard, retaining logs. |
 
-Settings apply the next time the worker starts. The main window is resizable; drag the divider to resize the attached console. The progress percentage counts completed, failed, review, and skipped groups as processed.
+Settings apply the next time the worker starts. The main window is resizable; drag the divider to resize the attached console. The progress percentage counts completed, failed, review, and skipped groups as processed. Completed counters and results are green; failed and review results are red. The posting-restriction restart message and countdown are red.
 
-Saved membership answers are read from the private `answers.txt` file. Unknown questions are recorded in `unanswered-questions.json` for review. **Joining and posting are checked separately:** pending membership approval, missing membership answers, disabled joining, and membership errors or timeouts still lead to a search for the post composer. If a usable composer is available, the worker attempts the exact post from that CSV row. If no composer appears before the configured timeout, the group is skipped. Posting limits, verification checks, paused groups, and explicit restrictions on posting still stop or skip as appropriate.
+Saved membership answers are read from the private `answers.txt` file. Unknown questions are recorded in `unanswered-questions.json` for review. **Blocked groups are skipped immediately:** paused, archived or closed-group notices, explicit restrictions on Pages joining or posting, pending approval, disabled joining, and unanswered membership questions do not lead to another composer search. A membership timeout is also recorded as skipped instead of starting a second full wait. Other browser errors retain their diagnostic details.
 
-Pending membership banners and an existing **Joined** status take priority over join buttons in related-group recommendations. If the pending request offers **Answer questions** and automatic joining is enabled, the worker tries the saved answers. Membership dialogs are dismissed when necessary so the composer can be checked even if joining cannot finish. Disabled join buttons are not forced. Turning automatic joining off still allows posting wherever a usable composer is available. If the composer itself requires unanswered participation questions, it cannot be submitted automatically.
+Pending membership banners and an existing **Joined** status take priority over join buttons in related-group recommendations. If the pending request offers **Answer questions** and automatic joining is enabled, the worker tries the saved answers, then skips if approval is still pending. Turning automatic joining off allows posting without joining, but explicit group restrictions and pending approval still cause a skip. A **Private** group label alone does not cause a skip: existing members can still post. For groups that pass these checks, the worker searches once for a usable composer within the configured timeout and posts the exact text from the CSV row. Missing composers are skipped; posting limits and verification checks keep their existing stop behavior.
 
 If the browser or posting tab closes, the worker stops and keeps later groups queued. The active group is kept queued if submission had not started; an interrupted submission remains marked for review instead of being retried automatically.
 
