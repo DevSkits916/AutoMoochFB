@@ -4,6 +4,8 @@
 
 Auto Mooch includes two Windows apps: **Facebook Group Scanner** collects group names and URLs into a CSV, and **Auto Mooch** imports that CSV after you add your post text. The dashboard shows the worker's current task, processed percentage, results, and console logs.
 
+The main window has a **groups/results panel on the left**, worker status and controls in the center, and the **console on the right**. **Import CSV** and **Shuffle Pending** are above the group list; **Export Remaining CSV** is directly below it. Drag the dividers to resize the panels.
+
 The workflow is: **scan groups → export CSV → add a `post` column → import into Auto Mooch**.
 
 ## Download both apps
@@ -105,6 +107,7 @@ Auto Mooch privately remembers the last successfully imported CSV and reloads it
 | --- | --- |
 | **Between groups (seconds)** | Delay between group attempts; default 8 seconds, range 0–3600. |
 | **Composer timeout (seconds)** | Time to look for the post composer; default 15 seconds, range 1–300. |
+| **Posting restriction wait (minutes)** | Wait before automatically restarting after a posting limit; default 180 minutes (3 hours). Accepts whole minutes from 1–10080. Set it before starting the worker; changes do not alter an active countdown. |
 | **Headless browser** | Runs without a visible browser. Use Open Login to sign in first. |
 | **Join groups automatically** | Requests membership when needed and accepts recognized rule checkboxes. Turn it off to attempt posting without joining. |
 | **Open data folder** | Opens the folder containing saved answers, logs, and failure screenshots. Find it under Show worker settings. |
@@ -125,9 +128,9 @@ If the browser or posting tab closes, the worker stops and keeps later groups qu
 
 <img width="566" height="342" alt="Facebook posting-limit message in the composer" src="https://github.com/user-attachments/assets/551640fe-eee2-4d91-85b5-1b0eb6b1f82b" />
 
-When Facebook shows the recognized **“We limit how often you can post…”** message, Auto Mooch stops the worker, sounds the alarm, and displays a **three-hour countdown at the top of the main window**. After the countdown expires and the old browser closes, it automatically restarts with the remaining queued groups. The restricted submission stays marked for review and is not automatically retried. A new posting-limit message starts another three-hour countdown.
+When Facebook shows the recognized **“We limit how often you can post…”** message, Auto Mooch stops the worker, sounds the alarm, and displays a **countdown at the top of the main window**. Set its duration under **Show worker settings → Posting restriction wait (minutes)** before starting the worker; the default is **180 minutes (3 hours)**. After the countdown expires and the old browser closes, it automatically restarts with the remaining queued groups. The restricted submission stays marked for review and is not automatically retried. A new posting-limit message starts another countdown using the wait captured at that worker start.
 
-**Stop cancels the scheduled restart. Closing Auto Mooch cancels it too, so leave the app open for the countdown to run.** Import, login, and start controls stay disabled during the countdown; press Stop to cancel it before using those controls. Waiting three hours does not guarantee Facebook has removed the restriction. Login, CAPTCHA, and other verification stops do not schedule an automatic restart.
+**Stop cancels the scheduled restart. Closing Auto Mooch cancels it too, so leave the app open for the countdown to run.** Import, login, and start controls stay disabled during the countdown; press Stop to cancel it before using those controls. Waiting for the countdown does not guarantee Facebook has removed the restriction. Login, CAPTCHA, and other verification stops do not schedule an automatic restart.
 
 **Complete** means the composer closed after submission; it does not guarantee public visibility or administrator approval. Completed and uncertain submissions are not automatically retried, including duplicate URL/post combinations. Failed and skipped groups may be retried on a later manual run. Live authenticated Facebook posting and scanning are not covered by the local tests, and Facebook interface changes may require updates. English Facebook controls are supported.
 
@@ -191,7 +194,7 @@ To investigate an issue:
 1. Stop the worker, open the data folder, and look at the latest entries in **`worker.log`**.
 2. Check the group's result in the dashboard and open its screenshot, if one was captured.
 3. If a saved answer is missing, review **`unanswered-questions.json`**, update **`answers.txt`**, and start the worker again.
-4. If no usable composer is available or posting is explicitly unavailable, the group is skipped. A posting-limit message stops the worker and starts the three-hour countdown. Closing the browser stops the queue and preserves unsubmitted work.
+4. If no usable composer is available or posting is explicitly unavailable, the group is skipped. A posting-limit message stops the worker and starts the configured restart countdown. Closing the browser stops the queue and preserves unsubmitted work.
 5. For **Review** results, check Facebook before trying the post again. Submission may already have started or succeeded. Do not clear `progress.json` to bypass the saved-result protection, because doing so can cause duplicate posts.
 
 These files can contain your post text, membership answers, group activity, or screenshots of your signed-in account. Keep the data folder private and share only the relevant, reviewed details when requesting help. The scanner has its own results and diagnostics folder, listed below; Auto Mooch's data-folder button opens the poster's folder.

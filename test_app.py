@@ -52,6 +52,48 @@ class Checks(unittest.TestCase):
             finally:
                 root.destroy()
 
+    def test_custom_posting_wait_is_captured_and_used(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = App(root)
+            app.jobs = [{'id': '123'}]
+            app.table.insert('', 'end', iid='0', values=('Test group', 'Queued'))
+            app.restart_wait_minutes.set('25')
+            thread = Mock()
+            thread.is_alive.return_value = False
+            with patch('app.threading.Thread', return_value=thread):
+                app.launch(False)
+            self.assertEqual(app.restart_wait_seconds, 1500)
+            app.restart_wait_minutes.set('90')
+            with patch('app.time.monotonic', return_value=100):
+                app.start_posting_cooldown()
+            self.assertEqual(app.cooldown_deadline, 1600)
+            self.assertIn('00:25:00', app.cooldown_text.get())
+            with patch('app.time.monotonic', return_value=1600), patch.object(app, 'launch') as launch:
+                app.update_posting_cooldown()
+                launch.assert_called_once_with(False, resume_indices=[0])
+        finally:
+            root.destroy()
+
+    def test_invalid_posting_wait_does_not_start_worker(self):
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = App(root)
+            app.jobs = [{'id': '123'}]
+            with patch('app.messagebox.showerror') as error, patch('app.threading.Thread') as thread:
+                for value in ('0', '-1', '10081', 'abc', 'nan', '1.5'):
+                    with self.subTest(value=value):
+                        app.restart_wait_minutes.set(value)
+                        error.reset_mock()
+                        app.launch(False)
+                        error.assert_called_once()
+                        thread.assert_not_called()
+            self.assertEqual(app.restart_wait_seconds, 10800)
+        finally:
+            root.destroy()
+
     def test_stop_cancels_posting_cooldown_and_delayed_alert(self):
         with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)):
             root = tk.Tk()

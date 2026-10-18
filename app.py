@@ -82,6 +82,7 @@ class App:
         self.halt_reason = None
         self.cooldown_deadline = None
         self.cooldown_pending = []
+        self.restart_wait_seconds = POSTING_COOLDOWN_SECONDS
         self.restart_allowed = True
         self.history_path = DATA / 'progress.json'
         self.history = json.loads(self.history_path.read_text('utf-8')) if self.history_path.exists() else {}
@@ -91,10 +92,11 @@ class App:
         self.counts = tk.StringVar(value='Complete 0     Failed 0     Skipped 0     Remaining 0')
         self.delay = tk.StringVar(value='8')
         self.composer_seconds = tk.StringVar(value='15')
+        self.restart_wait_minutes = tk.StringVar(value='180')
         self.join_groups = tk.BooleanVar(value=True)
         root.title('Auto Mooch')
-        root.geometry('1280x780')
-        root.minsize(900, 600)
+        root.geometry('1500x800')
+        root.minsize(1100, 600)
         root.resizable(True, True)
         style = ttk.Style()
         style.theme_use('clam')
@@ -114,7 +116,20 @@ class App:
         self.cooldown_label = ttk.Label(root, textvariable=self.cooldown_text, style='HUD.TLabel', padding=12, wraplength=850)
         self.panes = ttk.Panedwindow(root, orient='horizontal')
         self.panes.pack(fill='both', expand=True)
-        frame = ttk.Frame(self.panes, padding=16, width=760)
+        self.queue_frame = ttk.Frame(self.panes, padding=12, width=460)
+        self.panes.add(self.queue_frame, weight=3)
+        self.queue_frame.columnconfigure(0, weight=1)
+        self.queue_frame.rowconfigure(2, weight=1)
+        ttk.Label(self.queue_frame, text='Groups and results', style='HUD.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 8))
+        queue_controls = ttk.Frame(self.queue_frame)
+        queue_controls.grid(row=1, column=0, sticky='ew', pady=(0, 8))
+        for column in range(2):
+            queue_controls.columnconfigure(column, weight=1, uniform='queue-buttons')
+        self.import_button = ttk.Button(queue_controls, text='Import CSV', command=self.import_csv)
+        self.import_button.grid(row=0, column=0, sticky='ew', padx=(0, 4))
+        self.shuffle_button = ttk.Button(queue_controls, text='Shuffle Pending', command=self.shuffle_pending)
+        self.shuffle_button.grid(row=0, column=1, sticky='ew', padx=(4, 0))
+        frame = ttk.Frame(self.panes, padding=16, width=560)
         self.panes.add(frame, weight=3)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(5, weight=1)
@@ -134,10 +149,11 @@ class App:
         stats = ttk.Frame(frame)
         stats.grid(row=2, column=0, sticky='ew', pady=(0, 10))
         self.stat_values = [tk.StringVar(value='0') for _ in range(4)]
-        for column, (label, value) in enumerate(zip(('Complete', 'Failed', 'Skipped', 'Remaining'), self.stat_values)):
+        for index, (label, value) in enumerate(zip(('Complete', 'Failed', 'Skipped', 'Remaining'), self.stat_values)):
+            column = index % 2
             stats.columnconfigure(column, weight=1, uniform='stats')
             card = ttk.LabelFrame(stats, text=label, padding=8)
-            card.grid(row=0, column=column, sticky='ew', padx=(0, 5))
+            card.grid(row=index // 2, column=column, sticky='ew', padx=(0, 5), pady=(0, 5))
             ttk.Label(card, textvariable=value, style='HUD.TLabel').pack(anchor='w')
         progress_frame = ttk.Frame(frame)
         progress_frame.grid(row=3, column=0, sticky='ew', pady=(0, 12))
@@ -148,20 +164,20 @@ class App:
         self.progress_label.place(relx=0.5, rely=0.5, anchor='center')
         controls = ttk.Frame(frame)
         controls.grid(row=4, column=0, sticky='ew', pady=(0, 12))
-        for column in range(3):
+        for column in range(2):
             controls.columnconfigure(column, weight=1, uniform='buttons')
-        self.buttons = []
-        for column, (text, command) in enumerate([('Import CSV', self.import_csv), ('Open Login', lambda: self.launch(True)), ('Start Worker', lambda: self.launch(False))]):
-            button = ttk.Button(controls, text=text, command=command, style='Primary.TButton' if column == 2 else 'TButton')
+        self.buttons = [self.import_button]
+        for column, (text, command) in enumerate([('Open Login', lambda: self.launch(True)), ('Start Worker', lambda: self.launch(False))]):
+            button = ttk.Button(controls, text=text, command=command, style='Primary.TButton' if column == 1 else 'TButton')
             button.grid(row=0, column=column, sticky='ew', padx=3, pady=3)
             self.buttons.append(button)
         ttk.Button(controls, text='Stop', command=self.request_stop).grid(row=1, column=0, sticky='ew', padx=3, pady=3)
         self.skip_button = ttk.Button(controls, text='Skip Current Group', command=self.skip_current, state='disabled')
         self.skip_button.grid(row=1, column=1, sticky='ew', padx=3, pady=3)
-        ttk.Button(controls, text='Shuffle Pending', command=self.shuffle_pending).grid(row=1, column=2, sticky='ew', padx=3, pady=3)
-        ttk.Button(controls, text='Export Remaining CSV', command=self.export_remaining).grid(row=2, column=0, columnspan=3, sticky='ew', padx=3, pady=3)
-        table_frame = ttk.Frame(frame)
-        table_frame.grid(row=5, column=0, sticky='nsew')
+        self.export_button = ttk.Button(self.queue_frame, text='Export Remaining CSV', command=self.export_remaining)
+        self.export_button.grid(row=3, column=0, sticky='ew', pady=(10, 0))
+        table_frame = ttk.Frame(self.queue_frame)
+        table_frame.grid(row=2, column=0, sticky='nsew')
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
         self.table = ttk.Treeview(table_frame, columns=('group', 'state'), show='headings', height=4)
@@ -181,7 +197,7 @@ class App:
         self.settings_window.withdraw()
         self.settings_window.title('Auto Mooch • Worker settings')
         self.settings_window.transient(root)
-        self.settings_window.minsize(410, 330)
+        self.settings_window.minsize(410, 410)
         self.settings_window.resizable(True, True)
         self.settings_window.protocol('WM_DELETE_WINDOW', self.settings_window.withdraw)
         opts = ttk.LabelFrame(self.settings_window, text='Worker settings', padding=16)
@@ -192,12 +208,14 @@ class App:
         ttk.Entry(opts, textvariable=self.delay, width=7).grid(row=0, column=1, sticky='e')
         ttk.Label(opts, text='Composer timeout (seconds)').grid(row=1, column=0, sticky='w', pady=3)
         ttk.Entry(opts, textvariable=self.composer_seconds, width=7).grid(row=1, column=1, sticky='e')
-        ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=2, column=0, sticky='w', pady=(6, 0))
-        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=3, column=0, columnspan=2, sticky='w', pady=(4, 0))
-        ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=4, column=0, columnspan=2, sticky='w', pady=(14, 8))
-        ttk.Button(opts, text='Open data folder', command=self.open_data_folder).grid(row=5, column=0, columnspan=2, sticky='ew', pady=(0, 4))
-        ttk.Label(opts, text='Saved answers, logs, and failure screenshots.', wraplength=360).grid(row=6, column=0, columnspan=2, sticky='w', pady=(0, 12))
-        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=7, column=0, columnspan=2, sticky='e')
+        ttk.Label(opts, text='Posting restriction wait (minutes)').grid(row=2, column=0, sticky='w', pady=3)
+        ttk.Entry(opts, textvariable=self.restart_wait_minutes, width=7).grid(row=2, column=1, sticky='e')
+        ttk.Checkbutton(opts, text='Headless browser', variable=self.headless).grid(row=3, column=0, sticky='w', pady=(6, 0))
+        ttk.Checkbutton(opts, text='Join groups automatically', variable=self.join_groups).grid(row=4, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        ttk.Label(opts, text='Changes apply the next time you start the worker.', wraplength=360).grid(row=5, column=0, columnspan=2, sticky='w', pady=(14, 8))
+        ttk.Button(opts, text='Open data folder', command=self.open_data_folder).grid(row=6, column=0, columnspan=2, sticky='ew', pady=(0, 4))
+        ttk.Label(opts, text='Saved answers, logs, and failure screenshots.', wraplength=360).grid(row=7, column=0, columnspan=2, sticky='w', pady=(0, 12))
+        ttk.Button(opts, text='Close', command=self.settings_window.withdraw).grid(row=8, column=0, columnspan=2, sticky='e')
         self.console_window = None
         self.console_frame = None
         self.create_console(self.panes)
@@ -283,11 +301,11 @@ class App:
             return
         with self.queue_lock:
             self.cooldown_pending = list(self.pending)
-        self.cooldown_deadline = time.monotonic() + POSTING_COOLDOWN_SECONDS
+        self.cooldown_deadline = time.monotonic() + self.restart_wait_seconds
         self.cooldown_label.pack(side='top', fill='x', before=self.panes)
         for button in self.buttons:
             button.configure(state='disabled')
-        self.log('Posting restricted. Automatic restart scheduled in 3 hours; press Stop to cancel. The restricted post remains marked for review.')
+        self.log(f'Posting restricted. Automatic restart scheduled in {self.restart_wait_seconds // 60} minutes; press Stop to cancel. The restricted post remains marked for review.')
         self.update_posting_cooldown()
 
     def cancel_posting_cooldown(self, log_cancel=True):
@@ -317,7 +335,7 @@ class App:
                    if not self.history.get(self.jobs[i]['id'], '').startswith(('Complete', 'Review'))]
         self.cancel_posting_cooldown(log_cancel=False)
         if indices:
-            self.log('Three-hour wait finished. Restarting the worker with the remaining queued groups.')
+            self.log('Posting restriction wait finished. Restarting the worker with the remaining queued groups.')
             self.launch(False, resume_indices=indices)
         else:
             self.halt_reason = None
@@ -451,6 +469,12 @@ class App:
             composer_seconds = float(self.composer_seconds.get())
             if not 1 <= composer_seconds <= 300:
                 raise ValueError('Composer timeout must be between 1 and 300 seconds.')
+            try:
+                restart_minutes = int(self.restart_wait_minutes.get())
+            except ValueError:
+                raise ValueError('Posting restriction wait must be a whole number of minutes between 1 and 10080.') from None
+            if not 1 <= restart_minutes <= 10080:
+                raise ValueError('Posting restriction wait must be between 1 and 10080 minutes.')
             answers = []
             settings = DATA / 'answers.txt'
             raw = settings.read_text('utf-8').strip() if settings.exists() else ''
@@ -465,6 +489,7 @@ class App:
             messagebox.showerror('Settings', str(error))
             return
         self.stop.clear()
+        self.restart_wait_seconds = restart_minutes * 60
         self.restart_allowed = True
         self.halt_reason = None
         for button in self.buttons:
